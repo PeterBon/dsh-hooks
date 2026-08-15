@@ -49,12 +49,16 @@ jobs:
 
       # Auth: trusted publishing (OIDC) when no NPM_TOKEN secret is set,
       # falling back to the token otherwise. --provenance requires the OIDC
-      # path; plain token auth cannot produce provenance.
+      # path; plain token auth cannot produce provenance. Skipped when the
+      # version already exists on npm so the flow is re-runnable.
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "dsh-hooks@$VERSION" version >/dev/null 2>&1; then
+            echo "dsh-hooks@$VERSION already on npm — skipping publish"
+          elif [ -n "$NODE_AUTH_TOKEN" ]; then
             npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
             npm publish --access public
           else
