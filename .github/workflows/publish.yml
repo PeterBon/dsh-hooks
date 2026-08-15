@@ -21,7 +21,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
       # No registry-url: setup-node would otherwise write an empty
       # //registry.npmjs.org/:_authToken line into the user .npmrc, which
