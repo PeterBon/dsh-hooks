@@ -122,6 +122,8 @@ pnpm install
 pnpm run check     # typecheck + test + build
 ```
 
+发布与 CI 运维（Trusted Publishing、安全扫描、踩坑记录）：见 [docs/RELEASING.md](docs/RELEASING.md)。
+
 ## License
 
 MIT
