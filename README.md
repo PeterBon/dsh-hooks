@@ -69,7 +69,27 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 
 ## Feishu notification example
 
-See [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs) — a zero-dependency script that posts turn-completion / approval notices through the Feishu **app API** (works without a group custom bot). Configure it like:
+The fastest path is the one-shot setup CLI — it creates the Feishu app for you via a QR-code scan and writes all hook config:
+
+```sh
+dsh-hooks feishu-setup                 # default profile: web
+dsh-hooks feishu-setup --profile work  # another profile
+dsh-hooks feishu-test                  # send a test card with the stored credentials
+```
+
+`feishu-setup` prints a QR code (and opens it in your browser), waits for you to scan it with Feishu, then creates an app named 「DSH 通知机器人」 with message-send permission and writes:
+
+| File | Purpose |
+| --- | --- |
+| `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret + your open_id as the notification target (0600, never committed) |
+| `~/.dsh/dsh-hooks/notify-feishu.mjs` | stable copy of the notify script the hooks reference |
+| `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks block: `turn/end` (completed/error/aborted) + `approval/asked` + `agent/error` card hooks |
+
+Restart `dsh web` afterwards — you will get cards when turns finish, approvals are asked, or the agent errors.
+
+### Manual configuration
+
+Prefer wiring it by hand? See [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs) — a zero-dependency script that posts turn-completion / approval notices through the Feishu **app API** (works without a group custom bot). Configure it like:
 
 ```yaml
 - id: dsh-hooks
