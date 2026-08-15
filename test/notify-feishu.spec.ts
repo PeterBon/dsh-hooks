@@ -1,4 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   buildBody,
   buildCard,
@@ -6,6 +9,7 @@ import {
   fmtTime,
   formatDuration,
   getToken,
+  mergeConfig,
   parseArgs,
   readEnv,
   run,
@@ -68,6 +72,37 @@ describe('readEnv', () => {
     const ctx = readEnv({})
     expect(ctx.event).toBe('')
     expect(ctx.cwd).toBe('')
+  })
+})
+
+describe('mergeConfig', () => {
+  let dir: string
+  let configPath: string
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'dsh-hooks-feishu-'))
+    configPath = join(dir, 'feishu-config.json')
+  })
+
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true })
+  })
+
+  it('reads a valid result_max_chars from the config file', () => {
+    writeFileSync(configPath, JSON.stringify({ result_max_chars: 500 }), 'utf8')
+    expect(mergeConfig({}, configPath).resultMaxChars).toBe(500)
+  })
+
+  it('falls back for invalid result_max_chars values', () => {
+    for (const value of ['abc', 0, -5, null]) {
+      writeFileSync(configPath, JSON.stringify({ result_max_chars: value }), 'utf8')
+      expect(mergeConfig({}, configPath).resultMaxChars).toBeUndefined()
+    }
+  })
+
+  it('returns the context untouched when the file is missing', () => {
+    const ctx = { event: 'turn/end' }
+    expect(mergeConfig(ctx, join(dir, 'nope.json'))).toBe(ctx)
   })
 })
 
@@ -149,6 +184,16 @@ describe('buildBody', () => {
     const body = buildBody(baseCtx({ content: 'x'.repeat(2000) }))
     expect(body).not.toContain('x'.repeat(2000))
     expect(body.endsWith('…')).toBe(true)
+  })
+
+  it('honors resultMaxChars from the context', () => {
+    const body = buildBody(baseCtx({ content: 'x'.repeat(50), resultMaxChars: 10 }))
+    expect(body).toBe('x'.repeat(10) + '…')
+  })
+
+  it('falls back to a 300-char cap without resultMaxChars', () => {
+    const body = buildBody(baseCtx({ content: 'x'.repeat(2000) }))
+    expect(body).toBe('x'.repeat(300) + '…')
   })
 
   it('shows the error detail on error turns', () => {
@@ -328,5 +373,39 @@ describe('parseArgs / run', () => {
     const result = await run(baseCtx(), ['--text', '自定义正文'], noConfig)
     expect(result.kind).toBe('text')
     expect(result.text).toBe('自定义正文')
+  })
+
+  it('run applies result_max_chars from the config file', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'dsh-hooks-feishu-'))
+    try {
+      const configPath = join(dir, 'feishu-config.json')
+      writeFileSync(
+        configPath,
+        JSON.stringify({
+          app_id: 'cli_c',
+          app_secret: 's',
+          target_type: 'open_id',
+          target_id: 'ou_1',
+          result_max_chars: 10,
+        }),
+        'utf8',
+      )
+      const fetchMock = vi.fn(async (url) => {
+        if (String(url).includes('tenant_access_token')) {
+          return new Response(JSON.stringify({ code: 0, msg: 'ok', tenant_access_token: 'tok', expire: 7200 }), { status: 200 })
+        }
+        return new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const result = await run(
+        { event: 'turn/end', reason: 'completed', content: '这是一段超过十个字符的长文本内容。', timestamp: '2026-08-13T00:00:00.000Z' },
+        [],
+        configPath,
+      )
+      expect(result.kind).toBe('card')
+      expect(result.card.elements[2].text.content).toBe('这是一段超过十个字符…')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
