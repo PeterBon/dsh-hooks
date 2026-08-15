@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process'
+import { spawn, type ChildProcess } from 'node:child_process'
 import type { HookContext } from './context.js'
 import { eventLabel, renderTemplate, toEnv } from './context.js'
 import type { HookSpec } from './config.js'
@@ -16,6 +16,23 @@ export interface HookRunner {
 }
 
 export const DEFAULT_TIMEOUT_MS = 10000
+
+/**
+ * Terminate a spawned hook process. With `shell: true` on Windows the direct
+ * child is cmd.exe — killing only the shell orphans the actual hook command
+ * (e.g. `node notify-feishu.mjs`), so kill the whole tree first. The direct
+ * kill stays as the fallback (and the only path off Windows).
+ */
+export function terminate(child: ChildProcess): void {
+  if (process.platform === 'win32' && child.pid !== undefined) {
+    try {
+      spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' }).unref()
+    } catch {
+      // taskkill unavailable — fall through to the direct kill below.
+    }
+  }
+  child.kill()
+}
 
 /**
  * Fire-and-forget command runner. Emissions are irreversible side effects:
@@ -49,7 +66,7 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
 
     children.add(child)
     const timer = setTimeout(() => {
-      child.kill()
+      terminate(child)
       console.warn(`[dsh-hooks] 超时（${timeoutMs}ms），已终止：${eventLabel(ctx)}`)
     }, timeoutMs)
     // Never hold the process open for a hook.
@@ -67,7 +84,7 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
   }
 
   function dispose(): void {
-    for (const child of children) child.kill()
+    for (const child of children) terminate(child)
     children.clear()
   }
 
