@@ -13,6 +13,11 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    # id-token declared at both levels: some runner versions only honor the
+    # job-level grant for the OIDC env-var injection.
+    permissions:
+      contents: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +32,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run check
+
+      - name: Debug OIDC env
+        run: env | grep -E 'ACTIONS_ID_TOKEN' || echo 'no ACTIONS_ID_TOKEN vars'
 
       - name: Create GitHub release (when missing)
         env:
