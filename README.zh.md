@@ -9,6 +9,8 @@
 ## 安装
 
 ```sh
+dsh plugin --profile web add dsh-hooks           # 从 npm 安装
+# 或直接从 git 安装：
 dsh plugin --profile web add github:PeterBon/dsh-hooks
 ```
 
