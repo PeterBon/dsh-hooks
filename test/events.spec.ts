@@ -19,7 +19,7 @@ function sessionEvent(type: string, data: unknown) {
 }
 
 function fakeSession(id = 'session-1') {
-  return { id } as never
+  return { id, header: { cwd: 'D:\\work\\demo' } } as never
 }
 
 describe('hookMatches', () => {

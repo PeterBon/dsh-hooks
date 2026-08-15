@@ -73,6 +73,7 @@ export function turnEndContext(session: Session, turn: number, reasonKind: strin
   return {
     event: 'turn/end',
     sessionId: sessionKey(session),
+    cwd: session.header.cwd,
     turn,
     reason: reasonKind,
     durationMs: takeDuration(session),
@@ -84,6 +85,7 @@ export function turnStartContext(session: Session, turn: number): HookContext {
   return {
     event: 'turn/start',
     sessionId: sessionKey(session),
+    cwd: session.header.cwd,
     turn,
     timestamp: new Date().toISOString(),
   }
@@ -93,6 +95,7 @@ export function approvalContext(session: Session, data: ApprovalAskedData): Hook
   return {
     event: 'approval/asked',
     sessionId: sessionKey(session),
+    cwd: session.header.cwd,
     tool: data.toolName,
     callId: data.callId,
     reason: data.reason,
