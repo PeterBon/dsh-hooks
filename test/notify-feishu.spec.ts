@@ -231,10 +231,11 @@ describe('buildCard', () => {
     expect(card.header).toEqual({ template: 'green', title: { tag: 'plain_text', content: '✅ 任务已完成' } })
     const [el] = card.body.elements
     expect(el.tag).toBe('markdown')
-    expect(el.content).toContain('🕐 2026/8/13 00:28:12')
-    expect(el.content).toContain('📁 D:\\work\\demo')
-    expect(el.content).toContain('🗒 会话 sess-1')
-    expect(el.content).toContain('\n---\n结果：完成')
+    // Hard breaks (two trailing spaces) keep the meta lines on their own
+    // lines; a blank line before --- keeps it a thematic break.
+    expect(el.content).toContain('🕐 2026/8/13 00:28:12  \n📁 D:\\work\\demo')
+    expect(el.content).toContain('📁 D:\\work\\demo  \n🗒 会话 sess-1')
+    expect(el.content).toContain('🗒 会话 sess-1\n\n---\n\n结果：完成')
   })
 
   it('shows the readable session name instead of the raw id', () => {
