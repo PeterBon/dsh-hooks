@@ -26,7 +26,7 @@ jobs:
       # No registry-url: setup-node would otherwise write an empty
       # //registry.npmjs.org/:_authToken line into the user .npmrc, which
       # blocks the OIDC (trusted publishing) path with ENEEDAUTH.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: pnpm
