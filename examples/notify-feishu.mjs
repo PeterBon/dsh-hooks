@@ -347,27 +347,31 @@ export async function run(ctx, args = [], configPath = DEFAULT_CONFIG_PATH) {
   if (!merged.appId || !merged.appSecret) throw new Error('缺少 DSH_HOOKS_FEISHU_APP_ID / DSH_HOOKS_FEISHU_APP_SECRET')
   if (!merged.to) throw new Error('缺少 DSH_HOOKS_FEISHU_TO（接收者 open_id 或 chat_id）')
   if (!merged.event) throw new Error('缺少 DSH_HOOK_EVENT（请通过 dsh-hooks 触发，不要直接运行）')
+  // Credentials leave the pipeline here: card/text builders and the CLI
+  // logger only ever see presentation fields (event, reason, cwd, session,
+  // content, …), never secrets. Keeps the taint-to-log path clean.
+  const { appId, appSecret, to, receiveIdType: mergedReceiveIdType, ...presentationCtx } = merged
   const opts = parseArgs(args)
-  const presentation = eventPresentation(merged)
+  const presentation = eventPresentation(presentationCtx)
   const header = opts.header || presentation.header
   const title = opts.title || presentation.title
   if (!CARD_HEADERS.has(header)) {
     throw new Error(`无效的卡片配色: ${header}，可选: ${[...CARD_HEADERS].join(', ')}`)
   }
-  const token = await getToken(merged.appId, merged.appSecret)
-  const receiveIdType = merged.receiveIdType ?? 'open_id'
+  const token = await getToken(appId, appSecret)
+  const receiveIdType = mergedReceiveIdType ?? 'open_id'
   if (opts.textMode) {
-    const text = opts.body || buildBody(merged)
-    await sendText(token, merged.to, text, receiveIdType)
+    const text = opts.body || buildBody(presentationCtx)
+    await sendText(token, to, text, receiveIdType)
     return { kind: 'text', text }
   }
-  const card = buildCard(merged, {
+  const card = buildCard(presentationCtx, {
     header,
     title,
     note: opts.note || undefined,
-    body: opts.body || buildBody(merged),
+    body: opts.body || buildBody(presentationCtx),
   })
-  await sendCard(token, merged.to, card, receiveIdType)
+  await sendCard(token, to, card, receiveIdType)
   return { kind: 'card', card }
 }
 

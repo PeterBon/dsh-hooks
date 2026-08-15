@@ -4,6 +4,9 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "lib": ["ES2022"],
+    // TS 7 no longer auto-includes @types/* — declare the node globals
+    // (process, console, setTimeout, …) explicitly.
+    "types": ["node"],
     "outDir": "lib",
     "rootDir": "src",
     "strict": true,

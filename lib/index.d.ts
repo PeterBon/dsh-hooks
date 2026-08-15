@@ -3,7 +3,7 @@ import './types.js';
 import { Config } from './config.js';
 import { clearTurnTracking } from './events.js';
 export declare const name = "dsh-hooks";
-export declare const inject: readonly ["sessions"];
+export declare const inject: readonly ['sessions'];
 export { Config };
 export declare function apply(ctx: Context, config?: Config): void;
 export declare const _internals: {

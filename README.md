@@ -122,6 +122,8 @@ pnpm install
 pnpm run check     # typecheck + test + build
 ```
 
+Releasing and CI operations (Trusted Publishing, security scanning, gotchas): see [docs/RELEASING.md](docs/RELEASING.md).
+
 ## License
 
 MIT
