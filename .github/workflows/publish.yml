@@ -29,10 +29,12 @@ jobs:
 
       - run: pnpm run check
 
-      - name: Create GitHub release
+      - name: Create GitHub release (when missing)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release create "${{ github.ref_name }}" --generate-notes
+        run: |
+          gh release view "${{ github.ref_name }}" >/dev/null 2>&1 ||
+            gh release create "${{ github.ref_name }}" --generate-notes
 
       # Publishes only once an NPM_TOKEN repository secret exists; skipped
       # otherwise so tag + GitHub Release still land without npm access.
