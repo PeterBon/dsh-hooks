@@ -66,7 +66,7 @@
     "@deepseek-ai/schemastery": "^3.18.1",
     "@types/node": "^26.2.0",
     "typescript": "^5.6.0",
-    "vitest": "^3.0.0"
+    "vitest": "^4.1.10"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.73.0",
