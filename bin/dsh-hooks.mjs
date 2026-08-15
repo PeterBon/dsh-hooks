@@ -24,6 +24,7 @@
  * the environment beyond the setup process itself.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { registerApp } from '@larksuiteoapi/node-sdk'
@@ -33,6 +34,24 @@ import { run as notifyRun } from '../examples/notify-feishu.mjs'
 
 const CONFIG_DIR = join(homedir(), '.dsh', 'dsh-hooks')
 export const CONFIG_PATH = join(CONFIG_DIR, 'feishu-config.json')
+
+/** Open a URL in the default browser (best-effort, never throws). */
+export function openInBrowser(url) {
+  return new Promise((resolve) => {
+    const command =
+      process.platform === 'darwin'
+        ? { executable: 'open', args: [url] }
+        : process.platform === 'win32'
+          ? { executable: 'cmd', args: ['/c', 'start', '', url] }
+          : { executable: 'xdg-open', args: [url] }
+    const child = spawn(command.executable, command.args, { detached: true, stdio: 'ignore' })
+    child.on('error', () => resolve(undefined))
+    child.on('spawn', () => {
+      child.unref()
+      resolve(undefined)
+    })
+  })
+}
 
 /** Profile patch file for a profile name. */
 export function patchPath(profile) {
@@ -121,7 +140,7 @@ export async function setupFeishu({
   registerAppFn = registerApp,
   print = console.log,
   printErr = console.error,
-  openUrl = () => undefined,
+  openUrl = openInBrowser,
   paths = {},
 } = {}) {
   const configPath = paths.configPath ?? CONFIG_PATH
@@ -155,7 +174,8 @@ export async function setupFeishu({
       } catch {
         // Terminal QR is best-effort; the URL above always works.
       }
-      void openUrl(authorization.url).catch(() => undefined)
+      // Never let a browser-opener failure break the scan flow.
+      void Promise.resolve(openUrl(authorization.url)).catch(() => undefined)
     },
   })
 
