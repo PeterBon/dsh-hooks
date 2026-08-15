@@ -4,3 +4,8 @@ packages:
 allowBuilds:
   esbuild: true
   protobufjs: true
+
+# GHSA-93q8-gq69-wqmw: ansi-regex <5.0.1 ReDoS (via qrcode -> yargs -> strip-ansi).
+# Force the patched version until the qrcode/yargs chain is upgraded upstream.
+overrides:
+  ansi-regex: ^5.0.1
