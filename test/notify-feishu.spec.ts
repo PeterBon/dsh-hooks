@@ -132,36 +132,33 @@ describe('eventPresentation', () => {
 })
 
 describe('buildBody', () => {
-  it('builds a turn/end body with result and duration', () => {
-    const body = buildBody(baseCtx())
-    expect(body).toContain('完成')
-    expect(body).toContain('1 分 5 秒')
-    expect(body).toContain('#3')
-  })
-
-  it('shows the turn content on completed turns', () => {
+  it('shows the turn content directly on turn/end', () => {
     const body = buildBody(baseCtx({ content: '构建通过，测试 71/71 全绿。' }))
-    expect(body).toContain('内容：构建通过，测试 71/71 全绿。')
+    expect(body).toBe('构建通过，测试 71/71 全绿。')
   })
 
-  it('shows truncated turn content and keeps meta lines intact', () => {
+  it('omits result/duration/turn meta lines from turn/end cards', () => {
+    const body = buildBody(baseCtx({ content: '正文', durationMs: '65000' }))
+    expect(body).toBe('正文')
+    expect(body).not.toContain('完成')
+    expect(body).not.toContain('1 分 5 秒')
+    expect(body).not.toContain('#3')
+  })
+
+  it('truncates long turn content', () => {
     const body = buildBody(baseCtx({ content: 'x'.repeat(2000) }))
-    expect(body).toContain('结果：完成')
-    expect(body).toContain('内容：')
     expect(body).not.toContain('x'.repeat(2000))
+    expect(body.endsWith('…')).toBe(true)
   })
 
   it('shows the error detail on error turns', () => {
     const body = buildBody(baseCtx({ reason: 'error', error: 'upstream timeout' }))
-    expect(body).toContain('出错')
-    expect(body).toContain('详情：upstream timeout')
+    expect(body).toBe('详情：upstream timeout')
   })
 
-  it('labels every known reason kind in Chinese', () => {
-    expect(buildBody(baseCtx({ reason: 'aborted' }))).toContain('结果：已中断')
-    expect(buildBody(baseCtx({ reason: 'blocked' }))).toContain('结果：被阻塞')
-    expect(buildBody(baseCtx({ reason: 'interrupted' }))).toContain('结果：被中断')
-    expect(buildBody(baseCtx({ reason: 'max-tokens' }))).toContain('结果：输出超限')
+  it('prepends the error detail before the content on error turns', () => {
+    const body = buildBody(baseCtx({ reason: 'error', error: 'boom', content: 'partial work' }))
+    expect(body).toBe('详情：boom\npartial work')
   })
 
   it('builds an approval body with tool and truncated reason', () => {

@@ -25,8 +25,11 @@
  *   --header <color>       card header color (default depends on event)
  *   --title <title>        card title (default depends on event)
  *   --note <note>          extra meta line at the bottom
- *   --result               show the turn's reason/duration as body
  *   -q                     quiet: suppress success output (hooks parse stdout)
+ *
+ * Card body: `turn/end` shows the turn's final assistant text directly
+ * (failure detail first when the turn errored); other events carry their
+ * own one-line summaries.
  *
  * Zero npm dependencies: fetch is global in Node 18+.
  * The module exports its helpers for testing; it only executes when invoked
@@ -165,27 +168,15 @@ export function eventPresentation(ctx) {
   }
 }
 
-/** Chinese labels for every known `turn/end` reason kind. */
-const REASON_LABELS = {
-  completed: '完成',
-  error: '出错',
-  aborted: '已中断',
-  blocked: '被阻塞',
-  interrupted: '被中断',
-  'max-tokens': '输出超限',
-}
-
 /** Body text for the event, respecting feishu-notify truncation lengths. */
-export function buildBody(ctx, { showResult = true } = {}) {
-  const { event, reason, tool, error, status, durationMs, sessionId, content, turn } = ctx
+export function buildBody(ctx) {
+  const { event, reason, tool, error, status, sessionId, content, turn } = ctx
   const lines = []
   if (event === 'turn/end') {
-    const label = REASON_LABELS[reason] ?? reason
-    lines.push(`结果：${label}`)
-    if (durationMs) lines.push(`耗时：${formatDuration(Number(durationMs))}`)
-    if (showResult && turn) lines.push(`回合：#${turn}`)
+    // The turn's own words are the story: show the final assistant text
+    // directly, with the failure detail first when the turn errored.
     if (error) lines.push(`详情：${truncateText(error, 200) ?? error}`)
-    if (content) lines.push(`内容：${truncateText(content, 300) ?? content}`)
+    if (content) lines.push(truncateText(content, 300) ?? content)
   } else if (event === 'approval/asked') {
     lines.push('有一个操作等你批准')
     if (tool) lines.push(`工具：${tool}`)
@@ -201,7 +192,7 @@ export function buildBody(ctx, { showResult = true } = {}) {
     if (sessionId) lines.push(`会话：${sessionId}`)
   }
   const body = lines.join('\n')
-  // Overall body cap: meta lines + a truncated 内容/详情 line stay intact
+  // Overall body cap: the truncated 内容/详情 lines stay intact
   // (feishu-notify caps the result text itself, not the whole card).
   return truncateText(body, 1200) ?? body
 }
@@ -323,14 +314,14 @@ export async function sendText(token, to, text, receiveIdType = 'open_id') {
 
 /** Parse the optional CLI flags; positional args join into a body override. */
 export function parseArgs(args) {
-  const opts = { textMode: false, header: '', title: '', note: '', showResult: true, quiet: false, bodyParts: [] }
+  const opts = { textMode: false, header: '', title: '', note: '', quiet: false, bodyParts: [] }
   for (let i = 0; i < args.length; i++) {
     const a = args[i]
     if (a === '--text') opts.textMode = true
     else if (a === '--header') opts.header = args[++i]
     else if (a === '--title') opts.title = args[++i]
     else if (a === '--note') opts.note = args[++i]
-    else if (a === '--approval') opts.showResult = true // approval is the default body for approval events
+    else if (a === '--approval') { /* approval events already build their own body */ }
     else if (a === '-q') opts.quiet = true
     else opts.bodyParts.push(a)
   }
@@ -354,7 +345,7 @@ export async function run(ctx, args = [], configPath = DEFAULT_CONFIG_PATH) {
   const token = await getToken(merged.appId, merged.appSecret)
   const receiveIdType = merged.receiveIdType ?? 'open_id'
   if (opts.textMode) {
-    const text = opts.body || buildBody(merged, { showResult: opts.showResult })
+    const text = opts.body || buildBody(merged)
     await sendText(token, merged.to, text, receiveIdType)
     return { kind: 'text', text }
   }
@@ -362,7 +353,7 @@ export async function run(ctx, args = [], configPath = DEFAULT_CONFIG_PATH) {
     header,
     title,
     note: opts.note || undefined,
-    body: opts.body || buildBody(merged, { showResult: opts.showResult }),
+    body: opts.body || buildBody(merged),
   })
   await sendCard(token, merged.to, card, receiveIdType)
   return { kind: 'card', card }
