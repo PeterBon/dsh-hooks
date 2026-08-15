@@ -44,7 +44,9 @@ jobs:
 
       # Auth: trusted publishing (OIDC) when no NPM_TOKEN secret is set,
       # falling back to the token otherwise. --provenance requires the OIDC
-      # path; plain token auth cannot produce provenance.
+      # path; plain token auth cannot produce provenance. npm 10 (bundled
+      # with Node 22) has no automatic GitHub OIDC exchange, so exchange the
+      # id token for a Sigstore token ourselves (npm docs pattern).
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -53,5 +55,8 @@ jobs:
             npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
             npm publish --access public
           else
-            npm publish --provenance --access public --loglevel verbose
+            ID_TOKEN=$(curl -sLS "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sigstore" \
+              -H "User-Agent: actions/oidc-client" \
+              -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" | jq -r '.value')
+            SIGSTORE_ID_TOKEN="$ID_TOKEN" npm publish --provenance --access public
           fi
