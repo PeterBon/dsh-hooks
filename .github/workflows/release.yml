@@ -1,0 +1,56 @@
+name: Prepare release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (semver, e.g. 0.2.0)'
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Validate version input
+        run: node -e "if (!/^\\d+\\.\\d+\\.\\d+$/.test(process.argv[1])) { console.error('版本必须是 semver，例如 0.2.0'); process.exit(1) }" "${{ github.event.inputs.version }}"
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm run check
+
+      - name: Bump version on a release branch
+        run: |
+          V="${{ github.event.inputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "release/v$V"
+          npm version "$V" --no-git-tag-version
+          git add package.json
+          git commit -m "chore(release): v$V"
+          git push origin "release/v$V"
+
+      - name: Open release PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          V="${{ github.event.inputs.version }}"
+          gh pr create \
+            --base main \
+            --head "release/v$V" \
+            --title "chore(release): v$V" \
+            --body "发布准备：版本号已升至 v$V。合并此 PR 后，publish workflow 会打 tag、创建 GitHub Release，并在配置了 NPM_TOKEN 时发布到 npm。"

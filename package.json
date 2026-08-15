@@ -1,6 +1,7 @@
 {
   "name": "dsh-hooks",
   "version": "0.1.0",
+  "packageManager": "pnpm@11.21.0",
   "description": "Config-driven lifecycle hooks plugin for DeepSeek Harness: declare event -> command hooks in cordis.patch.yml, no plugin code required.",
   "author": "PeterBon",
   "license": "MIT",
