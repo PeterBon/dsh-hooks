@@ -27,6 +27,10 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Dependency security gate: fail on high/critical advisories. CI runs
+      # against the official registry regardless of local mirror config.
+      - run: pnpm audit --audit-level=high
+
       - run: pnpm run typecheck
 
       - run: pnpm run typecheck:test
