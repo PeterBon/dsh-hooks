@@ -85,7 +85,9 @@ export function readEnv(env = process.env) {
 /**
  * Load credentials from the local feishu-config.json (written by
  * `dsh-hooks feishu-setup`) and fill any missing credential fields —
- * environment variables always win. Returns a merged context.
+ * environment variables always win. Also picks up `result_max_chars`,
+ * the content truncation length (default 300); invalid values fall back.
+ * Returns a merged context.
  */
 export function mergeConfig(ctx, configPath = DEFAULT_CONFIG_PATH) {
   if (!existsSync(configPath)) return ctx
@@ -96,6 +98,10 @@ export function mergeConfig(ctx, configPath = DEFAULT_CONFIG_PATH) {
     return ctx
   }
   if (typeof file !== 'object' || file === null) return ctx
+  const fromFile =
+    Number.isFinite(file.result_max_chars) && file.result_max_chars > 0
+      ? Math.floor(file.result_max_chars)
+      : undefined
   return {
     ...ctx,
     appId: ctx.appId || file.app_id || '',
@@ -105,6 +111,7 @@ export function mergeConfig(ctx, configPath = DEFAULT_CONFIG_PATH) {
     // default pipeline posts to open_id, so a chat_id target must be sent
     // with receive_id_type=chat_id. readTargetType surfaces that choice.
     receiveIdType: ctx.to ? 'open_id' : file.target_type === 'chat_id' ? 'chat_id' : 'open_id',
+    resultMaxChars: ctx.resultMaxChars ?? fromFile,
   }
 }
 
@@ -171,12 +178,13 @@ export function eventPresentation(ctx) {
 /** Body text for the event, respecting feishu-notify truncation lengths. */
 export function buildBody(ctx) {
   const { event, reason, tool, error, status, sessionId, content, turn } = ctx
+  const resultMaxChars = ctx.resultMaxChars ?? 300
   const lines = []
   if (event === 'turn/end') {
     // The turn's own words are the story: show the final assistant text
     // directly, with the failure detail first when the turn errored.
     if (error) lines.push(`详情：${truncateText(error, 200) ?? error}`)
-    if (content) lines.push(truncateText(content, 300) ?? content)
+    if (content) lines.push(truncateText(content, resultMaxChars) ?? content)
   } else if (event === 'approval/asked') {
     lines.push('有一个操作等你批准')
     if (tool) lines.push(`工具：${tool}`)
