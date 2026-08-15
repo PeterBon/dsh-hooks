@@ -54,13 +54,15 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | --- | --- |
 | `DSH_HOOK_EVENT` | 事件类型，如 `turn/end` |
 | `DSH_HOOK_SESSION_ID` | 会话 id |
+| `DSH_HOOK_SESSION_NAME` | 会话可读标题（最新 `session/title` 日志事件，或首个用户消息回退） |
 | `DSH_HOOK_TURN` | 回合号（回合事件） |
 | `DSH_HOOK_REASON` | 回合结束原因 |
 | `DSH_HOOK_TOOL` | 工具名（审批事件） |
 | `DSH_HOOK_CALL_ID` | 工具调用 id（审批事件） |
 | `DSH_HOOK_DURATION_MS` | 回合耗时毫秒（turn/end） |
 | `DSH_HOOK_STATUS` | Agent 状态（agent/status） |
-| `DSH_HOOK_ERROR` | 错误文本（agent/error） |
+| `DSH_HOOK_ERROR` | 错误文本（agent/error，以及 turn/end 出错时的失败详情） |
+| `DSH_HOOK_CONTENT` | 该回合最后一段助手回复文本（回合事件） |
 | `DSH_HOOK_TIMESTAMP` | ISO 时间戳 |
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。

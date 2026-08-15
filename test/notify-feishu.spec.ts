@@ -25,6 +25,7 @@ function baseCtx(overrides = {}) {
     to: 'ou_1',
     event: 'turn/end',
     sessionId: 'sess-1',
+    sessionName: '',
     cwd: 'D:\\work\\demo',
     turn: '3',
     reason: 'completed',
@@ -33,6 +34,7 @@ function baseCtx(overrides = {}) {
     durationMs: '65000',
     status: '',
     error: '',
+    content: '',
     timestamp: '2026-08-13T00:00:00.000Z',
     ...overrides,
   }
@@ -46,10 +48,20 @@ describe('readEnv', () => {
       DSH_HOOKS_FEISHU_TO: 'ou_1',
       DSH_HOOK_EVENT: 'turn/end',
       DSH_HOOK_SESSION_ID: 'sess-1',
+      DSH_HOOK_SESSION_NAME: '修复构建',
       DSH_HOOK_CWD: 'D:\\x',
       DSH_HOOK_REASON: 'completed',
+      DSH_HOOK_CONTENT: '已修复',
     })
-    expect(ctx).toMatchObject({ appId: 'cli_x', to: 'ou_1', event: 'turn/end', sessionId: 'sess-1', cwd: 'D:\\x' })
+    expect(ctx).toMatchObject({
+      appId: 'cli_x',
+      to: 'ou_1',
+      event: 'turn/end',
+      sessionId: 'sess-1',
+      sessionName: '修复构建',
+      cwd: 'D:\\x',
+      content: '已修复',
+    })
   })
 
   it('defaults missing fields to empty strings', () => {
@@ -127,6 +139,24 @@ describe('buildBody', () => {
     expect(body).toContain('#3')
   })
 
+  it('shows the turn content on completed turns', () => {
+    const body = buildBody(baseCtx({ content: '构建通过，测试 71/71 全绿。' }))
+    expect(body).toContain('内容：构建通过，测试 71/71 全绿。')
+  })
+
+  it('shows truncated turn content and keeps meta lines intact', () => {
+    const body = buildBody(baseCtx({ content: 'x'.repeat(2000) }))
+    expect(body).toContain('结果：完成')
+    expect(body).toContain('内容：')
+    expect(body).not.toContain('x'.repeat(2000))
+  })
+
+  it('shows the error detail on error turns', () => {
+    const body = buildBody(baseCtx({ reason: 'error', error: 'upstream timeout' }))
+    expect(body).toContain('出错')
+    expect(body).toContain('详情：upstream timeout')
+  })
+
   it('builds an approval body with tool and truncated reason', () => {
     const body = buildBody(baseCtx({ event: 'approval/asked', reason: 'x'.repeat(300), tool: 'ssh_exec' }))
     expect(body).toContain('ssh_exec')
@@ -156,6 +186,17 @@ describe('buildCard', () => {
     expect(meta.text.content).toContain('🗒 会话 sess-1')
     expect(hr.tag).toBe('hr')
     expect(bodyEl.text.content).toBe('结果：完成')
+  })
+
+  it('shows the readable session name instead of the raw id', () => {
+    const card = buildCard(baseCtx({ sessionName: '修复飞书卡片' }), { header: 'green', title: 't' })
+    expect(card.elements[0].text.content).toContain('🗒 会话 修复飞书卡片')
+    expect(card.elements[0].text.content).not.toContain('sess-1')
+  })
+
+  it('omits the session line entirely when neither name nor id exists', () => {
+    const card = buildCard(baseCtx({ sessionId: '', sessionName: '' }), { header: 'blue', title: 't' })
+    expect(card.elements[0].text.content).not.toContain('🗒 会话')
   })
 
   it('omits hr/body when there is no body', () => {

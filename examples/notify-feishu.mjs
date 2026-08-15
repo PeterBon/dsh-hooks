@@ -65,6 +65,7 @@ export function readEnv(env = process.env) {
     to: env.DSH_HOOKS_FEISHU_TO,
     event: env.DSH_HOOK_EVENT ?? '',
     sessionId: env.DSH_HOOK_SESSION_ID ?? '',
+    sessionName: env.DSH_HOOK_SESSION_NAME ?? '',
     cwd: env.DSH_HOOK_CWD ?? '',
     turn: env.DSH_HOOK_TURN ?? '',
     reason: env.DSH_HOOK_REASON ?? '',
@@ -73,6 +74,7 @@ export function readEnv(env = process.env) {
     durationMs: env.DSH_HOOK_DURATION_MS ?? '',
     status: env.DSH_HOOK_STATUS ?? '',
     error: env.DSH_HOOK_ERROR ?? '',
+    content: env.DSH_HOOK_CONTENT ?? '',
     timestamp: env.DSH_HOOK_TIMESTAMP ?? '',
   }
 }
@@ -165,13 +167,15 @@ export function eventPresentation(ctx) {
 
 /** Body text for the event, respecting feishu-notify truncation lengths. */
 export function buildBody(ctx, { showResult = true } = {}) {
-  const { event, reason, tool, error, status, durationMs, sessionId, turn } = ctx
+  const { event, reason, tool, error, status, durationMs, sessionId, content, turn } = ctx
   const lines = []
   if (event === 'turn/end') {
     const label = reason === 'completed' ? '完成' : reason === 'error' ? '出错' : reason
     lines.push(`结果：${label}`)
     if (durationMs) lines.push(`耗时：${formatDuration(Number(durationMs))}`)
     if (showResult && turn) lines.push(`回合：#${turn}`)
+    if (error) lines.push(`详情：${truncateText(error, 200) ?? error}`)
+    if (content) lines.push(`内容：${truncateText(content, 300) ?? content}`)
   } else if (event === 'approval/asked') {
     lines.push('有一个操作等你批准')
     if (tool) lines.push(`工具：${tool}`)
@@ -187,8 +191,9 @@ export function buildBody(ctx, { showResult = true } = {}) {
     if (sessionId) lines.push(`会话：${sessionId}`)
   }
   const body = lines.join('\n')
-  // Overall body cap (result_max_chars default in feishu-notify is 300).
-  return truncateText(body, 300) ?? body
+  // Overall body cap: meta lines + a truncated 内容/详情 line stay intact
+  // (feishu-notify caps the result text itself, not the whole card).
+  return truncateText(body, 1200) ?? body
 }
 
 /**
@@ -198,7 +203,9 @@ export function buildBody(ctx, { showResult = true } = {}) {
 export function buildCard(ctx, { header, title, note, body, now = new Date() } = {}) {
   const metaLines = [`🕐 ${fmtTime(now)}`]
   if (ctx.cwd) metaLines.push(`📁 ${truncateText(ctx.cwd, 200) ?? ctx.cwd}`)
-  if (ctx.sessionId) metaLines.push(`🗒 会话 ${ctx.sessionId}`)
+  if (ctx.sessionName || ctx.sessionId) {
+    metaLines.push(`🗒 会话 ${truncateText(ctx.sessionName || ctx.sessionId, 80) ?? (ctx.sessionName || ctx.sessionId)}`)
+  }
   if (note) metaLines.push(`📝 ${note}`)
   const elements = [{ tag: 'div', text: { tag: 'lark_md', content: metaLines.join('\n') } }]
   if (body) {
