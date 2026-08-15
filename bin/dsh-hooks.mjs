@@ -240,16 +240,19 @@ export async function setupFeishu({
 }
 
 /** Test credentials and send a test card to the configured target. */
-export async function testFeishu({ print = console.log, printErr = console.error, paths = {} } = {}) {
+export async function testFeishu({ print = console.log, paths = {} } = {}) {
   const configPath = paths.configPath ?? CONFIG_PATH
   if (!existsSync(configPath)) {
-    printErr(`未找到配置文件 ${configPath}，请先运行 feishu-setup`)
-    process.exit(1)
+    throw new Error(`未找到配置文件 ${configPath}，请先运行 feishu-setup`)
   }
-  const file = JSON.parse(readFileSync(configPath, 'utf8'))
+  let file
+  try {
+    file = JSON.parse(readFileSync(configPath, 'utf8'))
+  } catch {
+    throw new Error(`配置文件 ${configPath} 解析失败，请重新运行 feishu-setup`)
+  }
   if (!file.app_id || !file.app_secret || !file.target_id) {
-    printErr('配置文件不完整，请重新运行 feishu-setup')
-    process.exit(1)
+    throw new Error('配置文件不完整，请重新运行 feishu-setup')
   }
   await notifyRun({
     appId: file.app_id,

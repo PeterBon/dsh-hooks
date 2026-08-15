@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -8,7 +8,8 @@ vi.mock('../examples/notify-feishu.mjs', () => ({
   run: vi.fn(async () => ({ kind: 'card' })),
 }))
 
-import { mergePatchYaml, notifyScriptPath, setupFeishu, setupHooks } from '../bin/dsh-hooks.mjs'
+import { run as notifyRun } from '../examples/notify-feishu.mjs'
+import { mergePatchYaml, notifyScriptPath, setupFeishu, setupHooks, testFeishu, writeConfig } from '../bin/dsh-hooks.mjs'
 
 let tmp: string
 
@@ -141,5 +142,26 @@ describe('setupFeishu', () => {
         paths: { configPath: join(tmp, 'c.json'), patchFile: join(tmp, 'p.yml') },
       }),
     ).rejects.toThrow('open_id')
+  })
+})
+
+describe('testFeishu', () => {
+  it('throws when the config file is missing', async () => {
+    await expect(testFeishu({ paths: { configPath: join(tmp, 'missing.json') } })).rejects.toThrow('未找到配置文件')
+  })
+
+  it('throws on an unparseable config file', async () => {
+    writeFileSync(join(tmp, 'broken.json'), '{not json', 'utf8')
+    await expect(testFeishu({ paths: { configPath: join(tmp, 'broken.json') } })).rejects.toThrow('解析失败')
+  })
+
+  it('sends a test card with the stored credentials', async () => {
+    const configPath = join(tmp, 'feishu-config.json')
+    writeConfig(configPath, { appId: 'cli_t', appSecret: 'sec', targetType: 'open_id', targetId: 'ou_t' })
+    const prints: string[] = []
+    await testFeishu({ print: (s) => prints.push(String(s)), paths: { configPath } })
+    expect(prints.join('\n')).toContain('测试卡片已发送')
+    expect(vi.mocked(notifyRun)).toHaveBeenCalledOnce()
+    expect(vi.mocked(notifyRun).mock.calls[0][0]).toMatchObject({ appId: 'cli_t', to: 'ou_t', event: 'agent/status' })
   })
 })
