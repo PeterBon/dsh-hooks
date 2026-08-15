@@ -13,8 +13,8 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
-    # id-token declared at both levels: some runner versions only honor the
-    # job-level grant for the OIDC env-var injection.
+    # id-token declared at both levels: the runner only injected the OIDC
+    # env vars once the job-level grant was present.
     permissions:
       contents: write
       id-token: write
@@ -23,18 +23,17 @@ jobs:
 
       - uses: pnpm/action-setup@v4
 
+      # No registry-url: setup-node would otherwise write an empty
+      # //registry.npmjs.org/:_authToken line into the user .npmrc, which
+      # blocks the OIDC (trusted publishing) path with ENEEDAUTH.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          registry-url: 'https://registry.npmjs.org'
 
       - run: pnpm install --frozen-lockfile
 
       - run: pnpm run check
-
-      - name: Debug OIDC env
-        run: env | grep -E 'ACTIONS_ID_TOKEN' || echo 'no ACTIONS_ID_TOKEN vars'
 
       - name: Create GitHub release (when missing)
         env:
@@ -51,6 +50,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           if [ -n "$NODE_AUTH_TOKEN" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
             npm publish --access public
           else
             npm publish --provenance --access public
