@@ -10,10 +10,9 @@ export interface HookSpec {
     on: HookEvent;
     /**
      * Optional filter. For `turn/end` it matches the reason kind
-     * (`completed`, `error`, …). Ignored (and validated as absent) for
-     * other events.
+     * (`completed`, `error`, …). Ignored for other events.
      */
-    when?: string;
+    when?: TurnEndReasonKind;
     /** Command to spawn through the platform shell. */
     run: string;
     /** Per-hook timeout in milliseconds. Defaults to 10000. */

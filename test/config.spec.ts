@@ -38,6 +38,17 @@ describe('Config schema', () => {
     expect(() => Config({ hooks: [{ on: 'turn/start' }] })).toThrow()
   })
 
+  it('accepts every known turn/end reason kind as when', () => {
+    for (const kind of ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted']) {
+      const result = Config({ hooks: [{ on: 'turn/end', when: kind, run: 'x' }] })
+      expect(result.hooks?.[0]?.when).toBe(kind)
+    }
+  })
+
+  it('rejects an unknown when value', () => {
+    expect(() => Config({ hooks: [{ on: 'turn/end', when: 'compleated' as never, run: 'x' }] })).toThrow()
+  })
+
   it('declares the v1 event surface', () => {
     expect(HOOK_EVENTS).toContain('turn/end')
     expect(HOOK_EVENTS).toContain('approval/asked')
