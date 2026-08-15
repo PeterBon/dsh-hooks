@@ -1,3 +1,4 @@
+import { type ChildProcess } from 'node:child_process';
 import type { HookContext } from './context.js';
 import type { HookSpec } from './config.js';
 export interface RunOutcome {
@@ -11,6 +12,13 @@ export interface HookRunner {
     dispose(): void;
 }
 export declare const DEFAULT_TIMEOUT_MS = 10000;
+/**
+ * Terminate a spawned hook process. With `shell: true` on Windows the direct
+ * child is cmd.exe — killing only the shell orphans the actual hook command
+ * (e.g. `node notify-feishu.mjs`), so kill the whole tree first. The direct
+ * kill stays as the fallback (and the only path off Windows).
+ */
+export declare function terminate(child: ChildProcess): void;
 /**
  * Fire-and-forget command runner. Emissions are irreversible side effects:
  * failures only warn, never retried, never block the agent loop.

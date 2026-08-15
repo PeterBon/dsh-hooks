@@ -13,6 +13,7 @@ import { spawn } from 'node:child_process'
 function fakeChild() {
   const listeners: Record<string, Array<(v?: unknown) => void>> = {}
   return {
+    pid: 12345,
     killed: false,
     unref: vi.fn(),
     kill: vi.fn(() => {
@@ -76,6 +77,24 @@ describe('createHookRunner', () => {
       runner.run({ on: 'turn/start', run: 'x', timeoutMs: 50 }, { event: 'turn/start', timestamp: 'T' })
       vi.advanceTimersByTime(60)
       expect(fakeChildRef.killed).toBe(true)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('kills the whole process tree on Windows timeout (shell:true)', () => {
+    vi.useFakeTimers()
+    try {
+      const runner = createHookRunner()
+      fakeChildRef = fakeChild()
+      spawnMock.mockReturnValue(fakeChildRef as never)
+      runner.run({ on: 'turn/start', run: 'x', timeoutMs: 50 }, { event: 'turn/start', timestamp: 'T' })
+      vi.advanceTimersByTime(60)
+      if (process.platform === 'win32') {
+        // The direct child is cmd.exe — taskkill /T must take the tree down.
+        const taskkill = spawnMock.mock.calls.find(([cmd]) => cmd === 'taskkill')
+        expect(taskkill).toEqual(['taskkill', ['/pid', '12345', '/T', '/F'], { stdio: 'ignore' }])
+      }
     } finally {
       vi.useRealTimers()
     }

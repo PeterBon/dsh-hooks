@@ -247,14 +247,16 @@ describe('getToken / sendCard / sendText', () => {
 })
 
 describe('parseArgs / run', () => {
+  // Explicit non-existent config path: tests must never read the real
+  // ~/.dsh/dsh-hooks/feishu-config.json on the developer machine.
+  const noConfig = 'Z:\\does\\not\\exist\\feishu-config.json'
+
   it('parses flags and positional body', () => {
     const opts = parseArgs(['--header', 'red', '--title', 'T', '--note', 'N', '-q', 'body text'])
     expect(opts).toMatchObject({ header: 'red', title: 'T', note: 'N', quiet: true, body: 'body text' })
   })
 
   it('run rejects missing credentials and invalid headers', async () => {
-    // Explicit non-existent config path: tests must never read the real one.
-    const noConfig = 'Z:\\does\\not\\exist\\feishu-config.json'
     await expect(run({ event: 'turn/end' }, [], noConfig)).rejects.toThrow('DSH_HOOKS_FEISHU_APP_ID')
     await expect(run(baseCtx(), ['--header', 'neon'], noConfig)).rejects.toThrow('无效的卡片配色')
   })
@@ -267,7 +269,7 @@ describe('parseArgs / run', () => {
       return new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const result = await run(baseCtx())
+    const result = await run(baseCtx(), [], noConfig)
     expect(result.kind).toBe('card')
     expect(result.card.header.title.content).toBe('✅ 任务已完成')
     expect(fetchMock).toHaveBeenCalledTimes(2)
@@ -281,7 +283,7 @@ describe('parseArgs / run', () => {
       return new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const result = await run(baseCtx(), ['--text', '自定义正文'])
+    const result = await run(baseCtx(), ['--text', '自定义正文'], noConfig)
     expect(result.kind).toBe('text')
     expect(result.text).toBe('自定义正文')
   })
