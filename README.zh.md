@@ -69,7 +69,27 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 
 ## 飞书通知示例
 
-见 [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs)——零依赖脚本，通过飞书**应用 API**（不需要群自定义机器人）发送回合完成 / 审批通知。配置示例：
+最快的方式是一步到位的 setup CLI——扫码自动创建飞书应用并写好全部 hook 配置：
+
+```sh
+dsh-hooks feishu-setup                 # 默认 profile：web
+dsh-hooks feishu-setup --profile work  # 指定其他 profile
+dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
+```
+
+`feishu-setup` 会打印二维码（并在浏览器中打开），等你用飞书扫码后，自动创建名为「DSH 通知机器人」的应用（带消息发送权限），并写入：
+
+| 文件 | 用途 |
+| --- | --- |
+| `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret 与你的 open_id（通知目标），权限 0600，严禁提交 |
+| `~/.dsh/dsh-hooks/notify-feishu.mjs` | hook 引用的通知脚本稳定副本 |
+| `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks 配置块：`turn/end`（completed/error/aborted）+ `approval/asked` + `agent/error` 卡片 hook |
+
+完成后重启 `dsh web`——回合结束、请求审批、agent 出错时就会收到卡片通知。
+
+### 手动配置
+
+想自己接线？见 [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs)——零依赖脚本，通过飞书**应用 API**（不需要群自定义机器人）发送回合完成 / 审批通知。配置示例：
 
 ```yaml
 - id: dsh-hooks
