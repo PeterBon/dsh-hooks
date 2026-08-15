@@ -54,13 +54,15 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | --- | --- |
 | `DSH_HOOK_EVENT` | event type, e.g. `turn/end` |
 | `DSH_HOOK_SESSION_ID` | session id |
+| `DSH_HOOK_SESSION_NAME` | readable session title (latest `session/title` log event, or first human prompt) |
 | `DSH_HOOK_TURN` | turn number (turn events) |
 | `DSH_HOOK_REASON` | turn end reason kind |
 | `DSH_HOOK_TOOL` | tool name (approval events) |
 | `DSH_HOOK_CALL_ID` | tool call id (approval events) |
 | `DSH_HOOK_DURATION_MS` | turn duration ms (turn/end) |
 | `DSH_HOOK_STATUS` | agent status (`agent/status`) |
-| `DSH_HOOK_ERROR` | error text (`agent/error`) |
+| `DSH_HOOK_ERROR` | error text (`agent/error`, and the failure message on `turn/end` error) |
+| `DSH_HOOK_CONTENT` | the turn's final assistant text (turn events) |
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.

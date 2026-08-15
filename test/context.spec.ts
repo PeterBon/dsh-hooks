@@ -20,6 +20,18 @@ describe('toEnv', () => {
     expect(env.DSH_HOOK_TURN).toBe('7')
     expect(env.DSH_HOOK_DURATION_MS).toBe('1234')
   })
+
+  it('carries session name and content when present', () => {
+    const env = toEnv({ event: 'turn/end', sessionName: '修复构建', content: '已修复', timestamp: 'T' })
+    expect(env.DSH_HOOK_SESSION_NAME).toBe('修复构建')
+    expect(env.DSH_HOOK_CONTENT).toBe('已修复')
+  })
+
+  it('omits session name and content when absent', () => {
+    const env = toEnv({ event: 'turn/end', timestamp: 'T' })
+    expect('DSH_HOOK_SESSION_NAME' in env).toBe(false)
+    expect('DSH_HOOK_CONTENT' in env).toBe(false)
+  })
 })
 
 describe('renderTemplate', () => {
@@ -46,6 +58,11 @@ describe('eventLabel', () => {
     expect(label).toContain('turn/end')
     expect(label).toContain('error')
     expect(label).toContain('s1')
+  })
+
+  it('labels sessions by readable name when known', () => {
+    const label = eventLabel({ event: 'turn/end', sessionId: 's1', sessionName: '构建脚本', timestamp: 'T' })
+    expect(label).toContain('构建脚本')
   })
 
   it('labels approval with tool', () => {

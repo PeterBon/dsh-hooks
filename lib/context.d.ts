@@ -6,6 +6,11 @@
 export interface HookContext {
     event: string;
     sessionId?: string;
+    /**
+     * Readable session title (the latest `session/title` log event, or a
+     * first-prompt fallback), when the session log offers one.
+     */
+    sessionName?: string;
     /** Absolute working directory of the session, when known. */
     cwd?: string;
     turn?: number;
@@ -15,6 +20,8 @@ export interface HookContext {
     durationMs?: number;
     status?: string;
     error?: string;
+    /** Turn content snapshot, e.g. the turn's final assistant text. */
+    content?: string;
     timestamp: string;
 }
 export declare function toEnv(ctx: HookContext): Record<string, string>;

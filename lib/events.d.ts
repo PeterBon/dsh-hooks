@@ -1,4 +1,4 @@
-import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
+import type { Session, SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session';
 import type { HookContext } from './context.js';
 import type { HookSpec, TurnEndReasonKind } from './config.js';
 import type { AgentLike } from './types.js';
@@ -31,11 +31,25 @@ export interface AgentStatusPayload {
     agent: AgentLike;
     status?: unknown;
 }
+/**
+ * Readable session title for notification cards. Mirrors the harness
+ * session-title conventions without depending on the title service:
+ * prefer the latest `session/title` log event (explicit rename, LLM title, or
+ * deterministic fallback), otherwise derive one from the first direct human
+ * prompt, as `dsh-session-title`'s fallback does.
+ */
+export declare function sessionTitle(session: Session): string | undefined;
+/**
+ * The turn's final assistant text, from the last `assistant/message` of that
+ * turn. Capped so the environment snapshot stays small — card builders apply
+ * their own display truncation.
+ */
+export declare function turnContent(session: Session, turn: number): string | undefined;
 export declare function rememberTurnStart(session: Session): void;
 export declare function clearTurnTracking(session: Session): void;
 /** Does a declared hook match this event (type + optional `when` filter)? */
 export declare function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndReasonKind): boolean;
-export declare function turnEndContext(session: Session, turn: number, reasonKind: string): HookContext;
+export declare function turnEndContext(session: Session, turn: number, reason: TurnEndReason | string): HookContext;
 export declare function turnStartContext(session: Session, turn: number): HookContext;
 export declare function approvalContext(session: Session, data: ApprovalAskedData): HookContext;
 export declare function agentCreatedContext(agent: AgentLike): HookContext;

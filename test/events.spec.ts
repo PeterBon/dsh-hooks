@@ -8,7 +8,9 @@ import {
   classifySessionEvent,
   errorText,
   hookMatches,
+  sessionTitle,
   statusText,
+  turnContent,
   turnEndContext,
   turnStartContext,
 } from '../src/events.js'
@@ -18,8 +20,48 @@ function sessionEvent(type: string, data: unknown) {
   return { type, seq: 1, time: Date.now(), data } as never
 }
 
-function fakeSession(id = 'session-1') {
-  return { id, header: { cwd: 'D:\\work\\demo' } } as never
+function fakeSession(id = 'session-1', events: unknown[] = []) {
+  return { id, header: { cwd: 'D:\\work\\demo' }, events } as never
+}
+
+function textBlock(text: string) {
+  return { type: 'text', text }
+}
+
+function userMessage(seq: number, text: string, kind = 'user') {
+  return {
+    type: 'user/message',
+    seq,
+    time: 1,
+    data: { id: `u${seq}`, role: 'user', content: [textBlock(text)], source: { kind } },
+  } as never
+}
+
+function titleEvent(seq: number, title: string) {
+  return {
+    type: 'session/title',
+    seq,
+    time: 1,
+    data: { title, messageSeqs: [], source: { kind: 'fallback' } },
+  } as never
+}
+
+function assistantMessage(seq: number, turn: number, text: string) {
+  return {
+    type: 'assistant/message',
+    seq,
+    time: 1,
+    data: {
+      turn,
+      step: 1,
+      message: {
+        id: `a${seq}`,
+        role: 'assistant',
+        content: [textBlock(text)],
+        source: { kind: 'model', provider: 'deepseek', model: 'deepseek-chat' },
+      },
+    },
+  } as never
 }
 
 describe('hookMatches', () => {
@@ -45,6 +87,111 @@ describe('hookMatches', () => {
   it('ignores when filters on non-turn events', () => {
     const filtered: HookSpec = { on: 'agent/error', when: 'completed', run: 'x' }
     expect(hookMatches(filtered, 'agent/error')).toBe(true)
+  })
+})
+
+describe('sessionTitle', () => {
+  it('prefers the latest session/title event', () => {
+    const session = fakeSession('s1', [titleEvent(1, '第一条标题'), titleEvent(5, '最新标题')])
+    expect(sessionTitle(session)).toBe('最新标题')
+  })
+
+  it('falls back to the first direct human prompt', () => {
+    const session = fakeSession('s1', [userMessage(1, '帮我写一个脚本'), userMessage(2, '再补充一点')])
+    expect(sessionTitle(session)).toBe('帮我写一个脚本')
+  })
+
+  it('skips injected plugin context and non-text messages', () => {
+    const session = fakeSession('s1', [
+      userMessage(1, '系统注入的说明', 'plugin'),
+      userMessage(2, '真实的人类提问'),
+    ])
+    expect(sessionTitle(session)).toBe('真实的人类提问')
+  })
+
+  it('collapses whitespace and control characters to one line', () => {
+    const session = fakeSession('s1', [userMessage(1, '第一行\n\u001B[31m带颜色\u001B[0m   第二行')])
+    expect(sessionTitle(session)).toBe('第一行 带颜色 第二行')
+  })
+
+  it('returns undefined when the log offers nothing', () => {
+    expect(sessionTitle(fakeSession())).toBeUndefined()
+    expect(sessionTitle(fakeSession('s1', [assistantMessage(1, 1, '只有回复')]))).toBeUndefined()
+  })
+})
+
+describe('turnContent', () => {
+  it('returns the final assistant text of the requested turn', () => {
+    const session = fakeSession('s1', [
+      assistantMessage(1, 1, '第一步'),
+      assistantMessage(2, 1, '第二步'),
+      assistantMessage(3, 2, '另一回合'),
+    ])
+    expect(turnContent(session, 1)).toBe('第二步')
+  })
+
+  it('joins multiple text blocks and ignores non-text blocks', () => {
+    const message = {
+      type: 'assistant/message',
+      seq: 1,
+      time: 1,
+      data: {
+        turn: 4,
+        step: 1,
+        message: {
+          id: 'a1',
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: '思考过程' },
+            { type: 'text', text: '第一段' },
+            { type: 'text', text: '第二段' },
+          ],
+          source: { kind: 'model', provider: 'p', model: 'm' },
+        },
+      },
+    } as never
+    expect(turnContent(fakeSession('s1', [message]), 4)).toBe('第一段\n\n第二段')
+  })
+
+  it('returns undefined when the turn has no assistant text', () => {
+    expect(turnContent(fakeSession('s1', [assistantMessage(1, 2, '其他回合')]), 1)).toBeUndefined()
+    expect(turnContent(fakeSession(), 1)).toBeUndefined()
+  })
+})
+
+describe('turnEndContext enrichment', () => {
+  it('carries session name and turn content for completed turns', () => {
+    const session = fakeSession('s2', [userMessage(1, '修复这个 bug'), assistantMessage(2, 1, '已修复，提交见 #9')])
+    const ctx = turnEndContext(session, 1, 'completed')
+    expect(ctx.sessionName).toBe('修复这个 bug')
+    expect(ctx.content).toBe('已修复，提交见 #9')
+    expect(ctx.reason).toBe('completed')
+    expect(ctx.error).toBeUndefined()
+  })
+
+  it('extracts the LlmFailure message for error turns', () => {
+    const ctx = turnEndContext(fakeSession('s2'), 2, {
+      kind: 'error',
+      error: { message: 'upstream timeout', code: 'TIMEOUT', status: 504 },
+    })
+    expect(ctx.reason).toBe('error')
+    expect(ctx.error).toBe('upstream timeout')
+  })
+
+  it('keeps working with a plain reason-kind string', () => {
+    const ctx = turnEndContext(fakeSession('s2'), 2, 'aborted')
+    expect(ctx).toMatchObject({ event: 'turn/end', reason: 'aborted', turn: 2 })
+  })
+
+  it('classifySessionEvent forwards the full reason to turnEndContext', () => {
+    const session = fakeSession('s2')
+    classifySessionEvent(session, sessionEvent('turn/start', { turn: 1 }))
+    const ctx = classifySessionEvent(
+      session,
+      sessionEvent('turn/end', { turn: 1, reason: { kind: 'error', error: { message: 'bad request', code: 'BAD' } } }),
+    )
+    expect(ctx?.reason).toBe('error')
+    expect(ctx?.error).toBe('bad request')
   })
 })
 
