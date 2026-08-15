@@ -1,4 +1,6 @@
 node_modules/
-lib/
 *.log
 .DS_Store
+# feishu-config.json holds the app secret and must never be committed.
+feishu-config.json
+# lib/ IS committed: git-hosted plugin installs do not build (see README).

@@ -212,8 +212,10 @@ describe('parseArgs / run', () => {
   })
 
   it('run rejects missing credentials and invalid headers', async () => {
-    await expect(run({ event: 'turn/end' })).rejects.toThrow('DSH_HOOKS_FEISHU_APP_ID')
-    await expect(run(baseCtx(), ['--header', 'neon'])).rejects.toThrow('无效的卡片配色')
+    // Explicit non-existent config path: tests must never read the real one.
+    const noConfig = 'Z:\\does\\not\\exist\\feishu-config.json'
+    await expect(run({ event: 'turn/end' }, [], noConfig)).rejects.toThrow('DSH_HOOKS_FEISHU_APP_ID')
+    await expect(run(baseCtx(), ['--header', 'neon'], noConfig)).rejects.toThrow('无效的卡片配色')
   })
 
   it('run sends a card for the default pipeline', async () => {

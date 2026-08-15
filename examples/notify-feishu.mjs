@@ -33,6 +33,12 @@
  * directly (node notify-feishu.mjs), not when imported.
  */
 import { pathToFileURL } from 'node:url'
+import { existsSync, readFileSync } from 'node:fs'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
+/** Default config file written by `dsh-hooks feishu-setup` (feishu-notify parity). */
+export const DEFAULT_CONFIG_PATH = join(homedir(), '.dsh', 'dsh-hooks', 'feishu-config.json')
 
 /** Common Feishu API error codes with Chinese hints (feishu-notify parity). */
 const ERROR_HINTS = {
@@ -68,6 +74,32 @@ export function readEnv(env = process.env) {
     status: env.DSH_HOOK_STATUS ?? '',
     error: env.DSH_HOOK_ERROR ?? '',
     timestamp: env.DSH_HOOK_TIMESTAMP ?? '',
+  }
+}
+
+/**
+ * Load credentials from the local feishu-config.json (written by
+ * `dsh-hooks feishu-setup`) and fill any missing credential fields —
+ * environment variables always win. Returns a merged context.
+ */
+export function mergeConfig(ctx, configPath = DEFAULT_CONFIG_PATH) {
+  if (!existsSync(configPath)) return ctx
+  let file
+  try {
+    file = JSON.parse(readFileSync(configPath, 'utf8'))
+  } catch {
+    return ctx
+  }
+  if (typeof file !== 'object' || file === null) return ctx
+  return {
+    ...ctx,
+    appId: ctx.appId || file.app_id || '',
+    appSecret: ctx.appSecret || file.app_secret || '',
+    to: ctx.to || file.target_id || '',
+    // target_type=chat_id targets need a different receive_id_type; the
+    // default pipeline posts to open_id, so a chat_id target must be sent
+    // with receive_id_type=chat_id. readTargetType surfaces that choice.
+    receiveIdType: ctx.to ? 'open_id' : file.target_type === 'chat_id' ? 'chat_id' : 'open_id',
   }
 }
 
@@ -199,8 +231,8 @@ export async function getToken(appId, appSecret, now = Date.now()) {
   return tokenCache.value
 }
 
-export async function sendCard(token, to, card) {
-  const response = await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
+export async function sendCard(token, to, card, receiveIdType = 'open_id') {
+  const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -219,8 +251,8 @@ export async function sendCard(token, to, card) {
   }
 }
 
-export async function sendText(token, to, text) {
-  const response = await fetch('https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=open_id', {
+export async function sendText(token, to, text, receiveIdType = 'open_id') {
+  const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -257,30 +289,32 @@ export function parseArgs(args) {
 }
 
 /** Full pipeline for one hook event. Exported for tests and CLI use. */
-export async function run(ctx, args = []) {
-  if (!ctx.appId || !ctx.appSecret) throw new Error('缺少 DSH_HOOKS_FEISHU_APP_ID / DSH_HOOKS_FEISHU_APP_SECRET')
-  if (!ctx.to) throw new Error('缺少 DSH_HOOKS_FEISHU_TO（接收者 open_id 或 chat_id）')
-  if (!ctx.event) throw new Error('缺少 DSH_HOOK_EVENT（请通过 dsh-hooks 触发，不要直接运行）')
+export async function run(ctx, args = [], configPath = DEFAULT_CONFIG_PATH) {
+  const merged = mergeConfig(ctx, configPath)
+  if (!merged.appId || !merged.appSecret) throw new Error('缺少 DSH_HOOKS_FEISHU_APP_ID / DSH_HOOKS_FEISHU_APP_SECRET')
+  if (!merged.to) throw new Error('缺少 DSH_HOOKS_FEISHU_TO（接收者 open_id 或 chat_id）')
+  if (!merged.event) throw new Error('缺少 DSH_HOOK_EVENT（请通过 dsh-hooks 触发，不要直接运行）')
   const opts = parseArgs(args)
-  const presentation = eventPresentation(ctx)
+  const presentation = eventPresentation(merged)
   const header = opts.header || presentation.header
   const title = opts.title || presentation.title
   if (!CARD_HEADERS.has(header)) {
     throw new Error(`无效的卡片配色: ${header}，可选: ${[...CARD_HEADERS].join(', ')}`)
   }
-  const token = await getToken(ctx.appId, ctx.appSecret)
+  const token = await getToken(merged.appId, merged.appSecret)
+  const receiveIdType = merged.receiveIdType ?? 'open_id'
   if (opts.textMode) {
-    const text = opts.body || buildBody(ctx, { showResult: opts.showResult })
-    await sendText(token, ctx.to, text)
+    const text = opts.body || buildBody(merged, { showResult: opts.showResult })
+    await sendText(token, merged.to, text, receiveIdType)
     return { kind: 'text', text }
   }
-  const card = buildCard(ctx, {
+  const card = buildCard(merged, {
     header,
     title,
     note: opts.note || undefined,
-    body: opts.body || buildBody(ctx, { showResult: opts.showResult }),
+    body: opts.body || buildBody(merged, { showResult: opts.showResult }),
   })
-  await sendCard(token, ctx.to, card)
+  await sendCard(token, merged.to, card, receiveIdType)
   return { kind: 'card', card }
 }
 
