@@ -6,14 +6,13 @@ on:
 
 permissions:
   contents: write
+  # OIDC token for npm trusted publishing (--provenance); harmless when the
+  # NPM_TOKEN fallback path is used instead.
+  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
-    env:
-      # `secrets` is not available in `if` conditionals — map it into the
-      # env context first, then branch on env.HAS_NPM_TOKEN below.
-      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -36,10 +35,15 @@ jobs:
           gh release view "${{ github.ref_name }}" >/dev/null 2>&1 ||
             gh release create "${{ github.ref_name }}" --generate-notes
 
-      # Publishes only once an NPM_TOKEN repository secret exists; skipped
-      # otherwise so tag + GitHub Release still land without npm access.
+      # Auth: trusted publishing (OIDC) when no NPM_TOKEN secret is set,
+      # falling back to the token otherwise. --provenance requires the OIDC
+      # path; plain token auth cannot produce provenance.
       - name: Publish to npm
-        if: env.HAS_NPM_TOKEN == 'true'
-        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NODE_AUTH_TOKEN" ]; then
+            npm publish --access public
+          else
+            npm publish --provenance --access public
+          fi

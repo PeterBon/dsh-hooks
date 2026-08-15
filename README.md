@@ -9,6 +9,8 @@ Declare `event -> command` hooks directly in your profile's `cordis.patch.yml` â
 ## Install
 
 ```sh
+dsh plugin --profile web add dsh-hooks           # from npm
+# or straight from git:
 dsh plugin --profile web add github:PeterBon/dsh-hooks
 ```
 
