@@ -157,6 +157,13 @@ describe('buildBody', () => {
     expect(body).toContain('详情：upstream timeout')
   })
 
+  it('labels every known reason kind in Chinese', () => {
+    expect(buildBody(baseCtx({ reason: 'aborted' }))).toContain('结果：已中断')
+    expect(buildBody(baseCtx({ reason: 'blocked' }))).toContain('结果：被阻塞')
+    expect(buildBody(baseCtx({ reason: 'interrupted' }))).toContain('结果：被中断')
+    expect(buildBody(baseCtx({ reason: 'max-tokens' }))).toContain('结果：输出超限')
+  })
+
   it('builds an approval body with tool and truncated reason', () => {
     const body = buildBody(baseCtx({ event: 'approval/asked', reason: 'x'.repeat(300), tool: 'ssh_exec' }))
     expect(body).toContain('ssh_exec')
@@ -224,6 +231,26 @@ describe('getToken / sendCard / sendText', () => {
     await expect(getToken('bad', 's')).rejects.toThrow('im:message:send_as_bot')
   })
 
+  it('getToken caches per app and refetches for a different appId', async () => {
+    const fetchMock = vi.fn(async (url, init) => {
+      const body = JSON.parse(String(init.body))
+      return new Response(
+        JSON.stringify({ code: 0, msg: 'ok', tenant_access_token: `tok-${body.app_id}`, expire: 7200 }),
+        { status: 200 },
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await getToken('cli_a', 's', 0)).toBe('tok-cli_a')
+    expect(await getToken('cli_a', 's', 1000)).toBe('tok-cli_a') // cached
+    expect(await getToken('cli_b', 's', 1000)).toBe('tok-cli_b') // different app
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('getToken surfaces HTTP failures instead of JSON parse errors', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('<html>Bad Gateway</html>', { status: 502 })))
+    await expect(getToken('cli_x', 's')).rejects.toThrow('HTTP 502')
+  })
+
   it('sendCard posts an interactive card with bearer auth', async () => {
     const fetchMock = vi.fn(async () => new Response(JSON.stringify({ code: 0, msg: 'success' }), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
@@ -243,6 +270,24 @@ describe('getToken / sendCard / sendText', () => {
     const body = JSON.parse(fetchMock.mock.calls[0][1].body)
     expect(body.msg_type).toBe('text')
     expect(JSON.parse(body.content)).toEqual({ text: '你好' })
+  })
+
+  it('sendCard surfaces HTTP errors with the API message when available', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ code: 1, msg: 'rate limited' }), { status: 429 })))
+    await expect(sendCard('tok', 'ou_9', {})).rejects.toThrow('HTTP 429')
+    await expect(sendCard('tok', 'ou_9', {})).rejects.toThrow('rate limited')
+  })
+
+  it('sendCard fails clearly on a non-JSON 2xx body', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('oops', { status: 200 })))
+    await expect(sendCard('tok', 'ou_9', {})).rejects.toThrow('无法解析')
+  })
+
+  it('sendCard translates network failures', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('ECONNREFUSED')
+    }))
+    await expect(sendCard('tok', 'ou_9', {})).rejects.toThrow('请求失败')
   })
 })
 

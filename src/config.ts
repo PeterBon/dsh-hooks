@@ -31,10 +31,9 @@ export interface HookSpec {
   on: HookEvent
   /**
    * Optional filter. For `turn/end` it matches the reason kind
-   * (`completed`, `error`, …). Ignored (and validated as absent) for
-   * other events.
+   * (`completed`, `error`, …). Ignored for other events.
    */
-  when?: string
+  when?: TurnEndReasonKind
   /** Command to spawn through the platform shell. */
   run: string
   /** Per-hook timeout in milliseconds. Defaults to 10000. */
@@ -58,8 +57,8 @@ export const Config: {
       on: Schema.union([...HOOK_EVENTS]).description(
         '触发事件：turn/start | turn/end | approval/asked | agent/created | agent/disposed | agent/error | agent/status',
       ),
-      when: Schema.string().description(
-        "可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted）",
+      when: Schema.union([...TURN_END_REASONS]).description(
+        '可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted）；其他事件忽略该字段',
       ),
       run: Schema.string().required().description('触发时通过系统 shell 执行的命令'),
       timeoutMs: Schema.number().default(10000).description('单次执行超时（毫秒）'),

@@ -130,7 +130,7 @@ export function clearTurnTracking(session: Session): void {
 /** Does a declared hook match this event (type + optional `when` filter)? */
 export function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndReasonKind): boolean {
   if (spec.on !== event) return false
-  if (spec.when === undefined || spec.when === '') return true
+  if (spec.when === undefined) return true
   // v1 `when` semantics: only `turn/end` carries a reason to filter on.
   if (event !== 'turn/end') return true
   return spec.when === reasonKind
