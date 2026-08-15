@@ -69,9 +69,20 @@ export function setupHooks(scriptPath) {
   ]
 }
 
-/** Absolute path of the shipped notify script. */
+/** Absolute path of the shipped notify script (where it lives now). */
 export function notifyScriptPath() {
   return new URL('../examples/notify-feishu.mjs', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1')
+}
+
+/**
+ * Resolve the stable notify-script location hooks should reference.
+ * The npx cache (where this CLI often runs from) is ephemeral, so the
+ * setup copies the zero-dependency script next to feishu-config.json:
+ * ~/.dsh/dsh-hooks/notify-feishu.mjs. Re-copies on every setup so the
+ * stable copy tracks the installed CLI version.
+ */
+export function stableScriptPath(paths = {}) {
+  return paths.notifyScript ?? join(CONFIG_DIR, 'notify-feishu.mjs')
 }
 
 /**
@@ -145,7 +156,7 @@ export async function setupFeishu({
 } = {}) {
   const configPath = paths.configPath ?? CONFIG_PATH
   const patchFile = paths.patchFile ?? patchPath(profile)
-  const notifyScript = paths.notifyScript ?? notifyScriptPath()
+  const notifyScript = stableScriptPath(paths)
 
   print('dsh-hooks feishu-setup')
   print('1/4 正在生成飞书「一键创建应用」二维码…')
@@ -196,6 +207,13 @@ export async function setupFeishu({
     resultMaxChars: 300,
   })
   print(`3/4 凭据已写入 ${configPath}（权限 0600，勿提交到仓库）`)
+
+  // Copy the notify script to its stable location so hooks never
+  // reference the ephemeral npx cache.
+  if (!paths.notifyScript) {
+    mkdirSync(CONFIG_DIR, { recursive: true, mode: 0o700 })
+    writeFileSync(notifyScript, readFileSync(notifyScriptPath(), 'utf8'), 'utf8')
+  }
 
   const existing = existsSync(patchFile) ? readFileSync(patchFile, 'utf8') : '[]\n'
   const merged = mergePatchYaml(existing, { scriptPath: notifyScript })
