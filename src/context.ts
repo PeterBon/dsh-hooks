@@ -7,6 +7,8 @@
 export interface HookContext {
   event: string
   sessionId?: string
+  /** Absolute working directory of the session, when known. */
+  cwd?: string
   turn?: number
   reason?: string
   tool?: string
@@ -20,6 +22,7 @@ export interface HookContext {
 export function toEnv(ctx: HookContext): Record<string, string> {
   const env: Record<string, string> = { DSH_HOOK_EVENT: ctx.event, DSH_HOOK_TIMESTAMP: ctx.timestamp }
   if (ctx.sessionId !== undefined) env.DSH_HOOK_SESSION_ID = ctx.sessionId
+  if (ctx.cwd !== undefined) env.DSH_HOOK_CWD = ctx.cwd
   if (ctx.turn !== undefined) env.DSH_HOOK_TURN = String(ctx.turn)
   if (ctx.reason !== undefined) env.DSH_HOOK_REASON = ctx.reason
   if (ctx.tool !== undefined) env.DSH_HOOK_TOOL = ctx.tool
