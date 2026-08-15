@@ -53,5 +53,5 @@ jobs:
             npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
             npm publish --access public
           else
-            npm publish --provenance --access public
+            npm publish --provenance --access public --loglevel verbose
           fi
