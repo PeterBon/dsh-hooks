@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 /**
- * Feishu card notification for dsh-hooks — style, content and truncation
- * lengths follow the feishu-notify conventions (information-list card with
- * a colored header, time/dir/session meta lines, hr-separated body).
+ * Feishu card notification for dsh-hooks — Card JSON 2.0 with a single
+ * markdown body component: colored header, time/dir/session meta lines, and
+ * the turn content rendered with full markdown (headings, tables, images).
+ * Truncation lengths follow the feishu-notify conventions.
  *
  * Reads the hook context from DSH_HOOK_* environment variables and posts an
  * interactive card through the Feishu app API (im/v1/messages). Works without
@@ -206,8 +207,10 @@ export function buildBody(ctx) {
 }
 
 /**
- * Information-list card: meta lines in one div (compact), an hr, then the
- * body. Matches the feishu-notify buildCard layout.
+ * Card JSON 2.0: a single `markdown` body component carries the meta lines
+ * plus an hr-separated body, so the turn's content renders with full
+ * markdown (headings, tables, images, code blocks). The colored header
+ * template is preserved.
  */
 export function buildCard(ctx, { header, title, note, body, now = new Date() } = {}) {
   const metaLines = [`🕐 ${fmtTime(now)}`]
@@ -216,15 +219,11 @@ export function buildCard(ctx, { header, title, note, body, now = new Date() } =
     metaLines.push(`🗒 会话 ${truncateText(ctx.sessionName || ctx.sessionId, 80) ?? (ctx.sessionName || ctx.sessionId)}`)
   }
   if (note) metaLines.push(`📝 ${note}`)
-  const elements = [{ tag: 'div', text: { tag: 'lark_md', content: metaLines.join('\n') } }]
-  if (body) {
-    elements.push({ tag: 'hr' })
-    elements.push({ tag: 'div', text: { tag: 'lark_md', content: body } })
-  }
+  const content = body ? `${metaLines.join('\n')}\n---\n${body}` : metaLines.join('\n')
   return {
-    config: { wide_screen_mode: true },
+    schema: '2.0',
     header: { template: header, title: { tag: 'plain_text', content: title } },
-    elements,
+    body: { elements: [{ tag: 'markdown', content }] },
   }
 }
 

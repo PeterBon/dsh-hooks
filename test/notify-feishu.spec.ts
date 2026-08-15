@@ -220,37 +220,43 @@ describe('buildBody', () => {
 })
 
 describe('buildCard', () => {
-  it('renders the information-list layout with meta lines and hr', () => {
+  it('renders a 2.0 card with meta lines and an hr-separated body', () => {
     const card = buildCard(baseCtx(), {
       header: 'green',
       title: '✅ 任务已完成',
       body: '结果：完成',
       now: new Date(2026, 7, 13, 0, 28, 12),
     })
-    expect(card.config).toEqual({ wide_screen_mode: true })
+    expect(card.schema).toBe('2.0')
     expect(card.header).toEqual({ template: 'green', title: { tag: 'plain_text', content: '✅ 任务已完成' } })
-    const [meta, hr, bodyEl] = card.elements
-    expect(meta.text.content).toContain('🕐 2026/8/13 00:28:12')
-    expect(meta.text.content).toContain('📁 D:\\work\\demo')
-    expect(meta.text.content).toContain('🗒 会话 sess-1')
-    expect(hr.tag).toBe('hr')
-    expect(bodyEl.text.content).toBe('结果：完成')
+    const [el] = card.body.elements
+    expect(el.tag).toBe('markdown')
+    expect(el.content).toContain('🕐 2026/8/13 00:28:12')
+    expect(el.content).toContain('📁 D:\\work\\demo')
+    expect(el.content).toContain('🗒 会话 sess-1')
+    expect(el.content).toContain('\n---\n结果：完成')
   })
 
   it('shows the readable session name instead of the raw id', () => {
     const card = buildCard(baseCtx({ sessionName: '修复飞书卡片' }), { header: 'green', title: 't' })
-    expect(card.elements[0].text.content).toContain('🗒 会话 修复飞书卡片')
-    expect(card.elements[0].text.content).not.toContain('sess-1')
+    expect(card.body.elements[0].content).toContain('🗒 会话 修复飞书卡片')
+    expect(card.body.elements[0].content).not.toContain('sess-1')
   })
 
   it('omits the session line entirely when neither name nor id exists', () => {
     const card = buildCard(baseCtx({ sessionId: '', sessionName: '' }), { header: 'blue', title: 't' })
-    expect(card.elements[0].text.content).not.toContain('🗒 会话')
+    expect(card.body.elements[0].content).not.toContain('🗒 会话')
   })
 
-  it('omits hr/body when there is no body', () => {
+  it('omits the hr separator when there is no body', () => {
     const card = buildCard(baseCtx(), { header: 'blue', title: 't', body: '' })
-    expect(card.elements).toHaveLength(1)
+    expect(card.body.elements[0].content).not.toContain('---')
+  })
+
+  it('passes the body through verbatim for markdown rendering', () => {
+    const body = '## 标题\n\n| 列 A | 列 B |\n| --- | --- |\n| 1 | 2 |'
+    const card = buildCard(baseCtx(), { header: 'blue', title: 't', body })
+    expect(card.body.elements[0].content).toContain(body)
   })
 })
 
@@ -403,7 +409,7 @@ describe('parseArgs / run', () => {
         configPath,
       )
       expect(result.kind).toBe('card')
-      expect(result.card.elements[2].text.content).toBe('这是一段超过十个字符…')
+      expect(result.card.body.elements[0].content).toContain('这是一段超过十个字符…')
     } finally {
       rmSync(dir, { recursive: true, force: true })
     }
