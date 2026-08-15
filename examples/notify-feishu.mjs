@@ -56,7 +56,7 @@ const CARD_HEADERS = new Set([
   'red', 'carmine', 'violet', 'purple', 'indigo', 'grey',
 ])
 
-let tokenCache = { value: null, expireAt: 0 }
+let tokenCache = new Map() // appId -> { value, expireAt }; tenant tokens are per-app
 
 export function readEnv(env = process.env) {
   return {
@@ -165,12 +165,22 @@ export function eventPresentation(ctx) {
   }
 }
 
+/** Chinese labels for every known `turn/end` reason kind. */
+const REASON_LABELS = {
+  completed: '完成',
+  error: '出错',
+  aborted: '已中断',
+  blocked: '被阻塞',
+  interrupted: '被中断',
+  'max-tokens': '输出超限',
+}
+
 /** Body text for the event, respecting feishu-notify truncation lengths. */
 export function buildBody(ctx, { showResult = true } = {}) {
   const { event, reason, tool, error, status, durationMs, sessionId, content, turn } = ctx
   const lines = []
   if (event === 'turn/end') {
-    const label = reason === 'completed' ? '完成' : reason === 'error' ? '出错' : reason
+    const label = REASON_LABELS[reason] ?? reason
     lines.push(`结果：${label}`)
     if (durationMs) lines.push(`耗时：${formatDuration(Number(durationMs))}`)
     if (showResult && turn) lines.push(`回合：#${turn}`)
@@ -219,27 +229,62 @@ export function buildCard(ctx, { header, title, note, body, now = new Date() } =
   }
 }
 
+/**
+ * Read one Feishu API response body. A non-2xx status fails first (surfacing
+ * the API's own message when it answered JSON); a 2xx body that is not JSON
+ * fails with a parse error instead of a confusing TypeError.
+ */
+async function readApiBody(response) {
+  if (!response.ok) {
+    let apiMsg = ''
+    try {
+      const body = await response.json()
+      if (body && typeof body.msg === 'string' && body.msg) apiMsg = ` msg=${body.msg}`
+    } catch {
+      // Non-JSON error page (proxy/HTML) — the status alone is the message.
+    }
+    throw new Error(`飞书接口 HTTP ${response.status}${apiMsg}`)
+  }
+  try {
+    return await response.json()
+  } catch {
+    throw new Error('飞书接口返回了无法解析的响应')
+  }
+}
+
+/** POST to the Feishu API with network-failure translation. */
+async function postApi(url, init) {
+  let response
+  try {
+    response = await fetch(url, init)
+  } catch (error) {
+    throw new Error(`飞书接口请求失败: ${error instanceof Error ? error.message : String(error)}`)
+  }
+  return readApiBody(response)
+}
+
 export async function getToken(appId, appSecret, now = Date.now()) {
-  if (tokenCache.value && now < tokenCache.expireAt) return tokenCache.value
-  const response = await fetch('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
+  const cached = tokenCache.get(appId)
+  if (cached && now < cached.expireAt) return cached.value
+  const body = await postApi('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ app_id: appId, app_secret: appSecret }),
   })
-  const body = await response.json()
   if (body.code !== 0) {
     const hint = ERROR_HINTS[body.code]
     throw new Error(`飞书接口错误 code=${body.code} msg=${body.msg}${hint ? `\n  → ${hint}` : ''}`)
   }
-  tokenCache = {
+  const entry = {
     value: body.tenant_access_token,
     expireAt: now + (body.expire - 300) * 1000, // 提前 5 分钟过期
   }
-  return tokenCache.value
+  tokenCache.set(appId, entry)
+  return entry.value
 }
 
 export async function sendCard(token, to, card, receiveIdType = 'open_id') {
-  const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
+  const body = await postApi(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -251,7 +296,6 @@ export async function sendCard(token, to, card, receiveIdType = 'open_id') {
       content: JSON.stringify(card),
     }),
   })
-  const body = await response.json()
   if (body.code !== 0) {
     const hint = ERROR_HINTS[body.code]
     throw new Error(`飞书接口错误 code=${body.code} msg=${body.msg}${hint ? `\n  → ${hint}` : ''}`)
@@ -259,7 +303,7 @@ export async function sendCard(token, to, card, receiveIdType = 'open_id') {
 }
 
 export async function sendText(token, to, text, receiveIdType = 'open_id') {
-  const response = await fetch(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
+  const body = await postApi(`https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type=${encodeURIComponent(receiveIdType)}`, {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
@@ -271,7 +315,6 @@ export async function sendText(token, to, text, receiveIdType = 'open_id') {
       content: JSON.stringify({ text }),
     }),
   })
-  const body = await response.json()
   if (body.code !== 0) {
     const hint = ERROR_HINTS[body.code]
     throw new Error(`飞书接口错误 code=${body.code} msg=${body.msg}${hint ? `\n  → ${hint}` : ''}`)
