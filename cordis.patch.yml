@@ -1,0 +1,7 @@
+# Mount the dsh-hooks plugin in any DSH profile that installs this package.
+# `insert` adds this plugin's row; `name` resolves through the profile's
+# node_modules. Hook definitions live in the profile's own cordis.patch.yml
+# config block (see README.zh.md), not here.
+- insert:
+    - id: dsh-hooks
+      name: dsh-hooks
