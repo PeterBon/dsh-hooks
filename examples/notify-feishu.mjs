@@ -219,7 +219,12 @@ export function buildCard(ctx, { header, title, note, body, now = new Date() } =
     metaLines.push(`🗒 会话 ${truncateText(ctx.sessionName || ctx.sessionId, 80) ?? (ctx.sessionName || ctx.sessionId)}`)
   }
   if (note) metaLines.push(`📝 ${note}`)
-  const content = body ? `${metaLines.join('\n')}\n---\n${body}` : metaLines.join('\n')
+  // CommonMark: two trailing spaces make a hard line break, so the meta
+  // lines stack compactly instead of collapsing into one line. The blank
+  // line before `---` keeps it a thematic break — directly after text it
+  // would be parsed as a setext heading underline and disappear.
+  const meta = metaLines.join('  \n')
+  const content = body ? `${meta}\n\n---\n\n${body}` : meta
   return {
     schema: '2.0',
     header: { template: header, title: { tag: 'plain_text', content: title } },
