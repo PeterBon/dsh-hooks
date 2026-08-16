@@ -89,6 +89,8 @@ dsh-hooks feishu-test                  # send a test card with the stored creden
 
 Restart `dsh web` afterwards — you will get cards when turns finish, approvals are asked, or the agent errors.
 
+![Feishu card example](assets/screenshot-1.jpg)
+
 ### Manual configuration
 
 Prefer wiring it by hand? See [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs) — a zero-dependency script that posts turn-completion / approval notices through the Feishu **app API** (works without a group custom bot). Configure it like:

@@ -89,6 +89,8 @@ dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
 
 完成后重启 `dsh web`——回合结束、请求审批、agent 出错时就会收到卡片通知。
 
+![飞书卡片示例](assets/screenshot-1.jpg)
+
 ### 手动配置
 
 想自己接线？见 [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs)——零依赖脚本，通过飞书**应用 API**（不需要群自定义机器人）发送回合完成 / 审批通知。配置示例：
