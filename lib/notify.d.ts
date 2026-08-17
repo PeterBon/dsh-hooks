@@ -1,9 +1,11 @@
 import type { HookContext } from './context.js';
 import type { NotifySpec } from './config.js';
+import type { HookRunRecord } from './history.js';
 export interface NotifyResult {
     ok: boolean;
     error?: string;
 }
+export type NotifyRecord = (record: Omit<HookRunRecord, 'ts'>) => void;
 /** Fetch timeout for webhook sends (ms). */
 export declare const NOTIFY_TIMEOUT_MS = 10000;
 /** One-line summary for Slack-style and desktop notifications. */
@@ -23,4 +25,4 @@ export declare function sendWebhook(spec: NotifySpec, ctx: HookContext, env?: No
  */
 export declare function sendDesktop(spec: NotifySpec, ctx: HookContext): Promise<NotifyResult>;
 /** Fire a built-in notification; failures only warn. */
-export declare function fireNotify(spec: NotifySpec, ctx: HookContext): Promise<void>;
+export declare function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord): Promise<void>;

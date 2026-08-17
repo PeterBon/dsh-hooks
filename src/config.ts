@@ -86,8 +86,19 @@ export interface HookSpec {
   retryDelayMs?: number
 }
 
+/** Execution-history settings: in-memory ring buffer + optional JSONL log. */
+export interface HistoryConfig {
+  /** Persist records to disk. Defaults to true. */
+  enabled?: boolean
+  /** JSONL file path. Defaults to ~/.dsh/dsh-hooks/history.jsonl (0600). */
+  path?: string
+  /** In-memory ring buffer size. Defaults to 500. */
+  max?: number
+}
+
 export interface Config {
   hooks?: HookSpec[]
+  history?: HistoryConfig | null
 }
 
 // Explicit structural annotation: the inferred Schema type names the
@@ -132,4 +143,14 @@ export const Config: {
   )
     .default([])
     .description('事件触发时执行的外部命令列表；按声明顺序触发'),
+  history: Schema.union([
+    Schema.object({
+      enabled: Schema.boolean().default(true).description('是否把执行历史持久化到磁盘（默认 true）'),
+      path: Schema.string().description('JSONL 文件路径（默认 ~/.dsh/dsh-hooks/history.jsonl，权限 0600）'),
+      max: Schema.natural().default(500).description('内存环形缓冲条数（默认 500）'),
+    }),
+    Schema.const(null),
+  ])
+    .default(null)
+    .description('hook 执行历史：内存环形缓冲 + 可选 JSONL 持久化日志（供 UI/调试使用，严格 best-effort）'),
 }).description('dsh-hooks 配置：声明式生命周期 hooks')

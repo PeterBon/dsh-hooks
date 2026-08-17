@@ -8,11 +8,14 @@ import { spawn } from 'node:child_process'
 import type { HookContext } from './context.js'
 import { eventLabel } from './context.js'
 import type { NotifySpec } from './config.js'
+import type { HookRunRecord } from './history.js'
 
 export interface NotifyResult {
   ok: boolean
   error?: string
 }
+
+export type NotifyRecord = (record: Omit<HookRunRecord, 'ts'>) => void
 
 /** Fetch timeout for webhook sends (ms). */
 export const NOTIFY_TIMEOUT_MS = 10000
@@ -177,7 +180,30 @@ function runAndWait(argv: string[], env: Record<string, string>, timeoutMs: numb
 }
 
 /** Fire a built-in notification; failures only warn. */
-export async function fireNotify(spec: NotifySpec, ctx: HookContext): Promise<void> {
+export async function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord): Promise<void> {
+  const startedAt = Date.now()
   const result = spec.channel === 'webhook' ? await sendWebhook(spec, ctx) : await sendDesktop(spec, ctx)
-  if (!result.ok) console.warn(`[dsh-hooks] 通知发送失败 (${eventLabel(ctx)}): ${result.error}`)
+  if (!result.ok) {
+    console.warn(`[dsh-hooks] 通知发送失败 (${eventLabel(ctx)}): ${result.error}`)
+    record?.({
+      kind: 'notify',
+      event: ctx.event,
+      command: `notify:${spec.channel}`,
+      sessionId: ctx.sessionId,
+      sessionName: ctx.sessionName,
+      outcome: 'send-failed',
+      durationMs: Date.now() - startedAt,
+      error: result.error,
+    })
+    return
+  }
+  record?.({
+    kind: 'notify',
+    event: ctx.event,
+    command: `notify:${spec.channel}`,
+    sessionId: ctx.sessionId,
+    sessionName: ctx.sessionName,
+    outcome: 'sent',
+    durationMs: Date.now() - startedAt,
+  })
 }

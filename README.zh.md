@@ -121,6 +121,39 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。
 
+## 执行历史
+
+每次 hook 触发都会记入内存环形缓冲（默认 500 条），并 best-effort 追加到 `~/.dsh/dsh-hooks/history.jsonl`（权限 0600）——供未来 UI 与调试使用。记录不含 secret（环境变量从不入记录）：
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    history:
+      enabled: true        # 可选：持久化到磁盘（默认 true）
+      max: 500             # 可选：内存环形缓冲条数
+      # path: '…'          # 可选：自定义 JSONL 路径（默认 ~/.dsh/dsh-hooks/history.jsonl）
+    hooks: […]
+```
+
+每条记录：时间戳、kind（run/notify）、事件、命令、会话、结果（spawned / exit-0 / exit-nonzero / timeout / sent / send-failed…）、退出码、耗时、stderr 尾部。写盘失败静默吞掉，绝不阻塞 hook。
+
+## dry-run：验证配置
+
+配置完先用 `dry-run` 模拟事件，看哪些 hook 会触发、哪些被过滤：
+
+```sh
+dsh-hooks dry-run turn/end --reason completed --profile web
+# ✅ [1] [turn/end when=completed] run: node notify-feishu.mjs
+# ⏭ [2] [turn/end when=error] run: … —— when 不匹配（期望 error，实际 completed）
+# ⏭ [3] [tool/call] run: … —— 事件不匹配（tool/call ≠ turn/end）
+# 共 1 个 hook 会触发。加 --execute 实际执行（真实副作用！）
+
+dsh-hooks dry-run tool/call --tool ssh_exec --execute   # 端到端真跑匹配的 hook
+```
+
+`dry-run` 直接读 profile 的 `cordis.patch.yml`（`id: dsh-hooks` 配置块），配置校验（非法正则等）会在这一步报错。
+
 ## 通用 webhook 示例
 
 除了飞书，`examples/notify-webhook.mjs` 把完整 hook 上下文作为一份 JSON POST 到任意 HTTP 端点——Slack 入站 webhook、Discord、企业微信/钉钉自定义机器人、ntfy、Bark、n8n 都能接：

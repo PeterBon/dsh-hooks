@@ -31,6 +31,7 @@ import { registerApp } from '@larksuiteoapi/node-sdk'
 import QRCode from 'qrcode'
 import YAML from 'yaml'
 import { run as notifyRun } from '../examples/notify-feishu.mjs'
+import { runDryRun } from '../lib/dry-run.js'
 
 const CONFIG_DIR = join(homedir(), '.dsh', 'dsh-hooks')
 export const CONFIG_PATH = join(CONFIG_DIR, 'feishu-config.json')
@@ -277,6 +278,20 @@ function cliArgs(args) {
   return opts
 }
 
+/** Parse the dry-run flags; the first positional arg is the event. */
+function cliDryRunArgs(args) {
+  const opts = { event: '', execute: false }
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--reason') opts.reason = args[++i]
+    else if (args[i] === '--tool') opts.tool = args[++i]
+    else if (args[i] === '--session-name') opts.sessionName = args[++i]
+    else if (args[i] === '--profile') opts.profile = args[++i]
+    else if (args[i] === '--execute') opts.execute = true
+    else if (!args[i].startsWith('-') && opts.event === '') opts.event = args[i]
+  }
+  return opts
+}
+
 function isDirectRun() {
   try {
     return process.argv[1] !== undefined && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, '/')}`).href
@@ -301,10 +316,24 @@ function runCli() {
         console.error(`✗ ${error instanceof Error ? error.message : String(error)}`)
         process.exit(1)
       })
+  } else if (command === 'dry-run') {
+    const opts = cliDryRunArgs(args)
+    if (!opts.event) {
+      console.error('缺少事件参数，用法：dsh-hooks dry-run <event> [--reason <kind>] [--profile <name>] [--execute]')
+      process.exit(1)
+    }
+    runDryRun(opts)
+      .then(() => process.exit(0))
+      .catch((error) => {
+        console.error(`✗ ${error instanceof Error ? error.message : String(error)}`)
+        process.exit(1)
+      })
   } else {
     console.error(`用法:
   dsh-hooks feishu-setup [--profile <name>]   扫码创建飞书通知机器人并自动配置
-  dsh-hooks feishu-test                       验证配置并发送测试卡片`)
+  dsh-hooks feishu-test                       验证配置并发送测试卡片
+  dsh-hooks dry-run <event> [--reason <kind>] [--tool <name>] [--profile <name>] [--execute]
+                                              模拟事件，列出会触发/被过滤的 hook（--execute 实际执行）`)
     process.exit(command === '--help' || command === 'help' || command === undefined ? 0 : 1)
   }
 }

@@ -1,6 +1,7 @@
 import { type ChildProcess } from 'node:child_process';
 import type { HookContext } from './context.js';
 import type { HookSpec } from './config.js';
+import type { HookRunRecord } from './history.js';
 export interface RunOutcome {
     ok: boolean;
     reason: 'ran' | 'timeout' | 'spawn-failed' | 'skipped';
@@ -11,6 +12,7 @@ export interface HookRunner {
     run(spec: HookSpec, ctx: HookContext): RunOutcome;
     dispose(): void;
 }
+export type RunRecord = (record: Omit<HookRunRecord, 'ts'>) => void;
 export declare const DEFAULT_TIMEOUT_MS = 10000;
 export declare const DEFAULT_RETRY_DELAY_MS = 500;
 /**
@@ -29,4 +31,4 @@ export declare function terminate(child: ChildProcess): void;
  * context as one JSON document to stdin, and `retries` re-spawns commands
  * whose exit code is non-zero (with exponential backoff, in the background).
  */
-export declare function createHookRunner(log?: (line: string) => void): HookRunner;
+export declare function createHookRunner(log?: (line: string) => void, record?: RunRecord): HookRunner;
