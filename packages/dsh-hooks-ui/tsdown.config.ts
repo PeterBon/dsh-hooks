@@ -14,8 +14,4 @@ export default defineConfig({
   // React comes from the shell's own React 18 (peerDependency) — never
   // bundle a second copy into client.js.
   external: ['react', 'react-dom', 'react/jsx-runtime'],
-  css: {
-    inject: true,
-    modules: { scopeBehaviour: 'local' },
-  },
 })

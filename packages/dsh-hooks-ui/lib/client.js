@@ -1,4 +1,3 @@
-import './style.css';
 import { createRequire } from "node:module";
 import { useCallback, useEffect, useState } from "react";
 import { Fragment, jsx, jsxs } from "react/jsx-runtime";
@@ -109,46 +108,6 @@ function outcomeTone(outcome) {
 	return OUTCOME_TONES[outcome] ?? "neutral";
 }
 //#endregion
-//#region src/client/panel.module.css
-var panel_module_default$1 = {
-	"badge": "orxP8a_badge",
-	"badges": "orxP8a_badges",
-	"body": "orxP8a_body",
-	"button": "orxP8a_button",
-	"buttonPrimary": "orxP8a_buttonPrimary",
-	"buttons": "orxP8a_buttons",
-	"close": "orxP8a_close",
-	"empty": "orxP8a_empty",
-	"errorBanner": "orxP8a_errorBanner",
-	"field": "orxP8a_field",
-	"fieldLabel": "orxP8a_fieldLabel",
-	"header": "orxP8a_header",
-	"input": "orxP8a_input",
-	"outcome": "orxP8a_outcome",
-	"outcomeBad": "orxP8a_outcomeBad",
-	"outcomeNeutral": "orxP8a_outcomeNeutral",
-	"outcomeOk": "orxP8a_outcomeOk",
-	"outcomeWarn": "orxP8a_outcomeWarn",
-	"panel": "orxP8a_panel",
-	"record": "orxP8a_record",
-	"recordCommand": "orxP8a_recordCommand",
-	"recordError": "orxP8a_recordError",
-	"recordEvent": "orxP8a_recordEvent",
-	"recordMain": "orxP8a_recordMain",
-	"recordTime": "orxP8a_recordTime",
-	"recordTop": "orxP8a_recordTop",
-	"sectionTitle": "orxP8a_sectionTitle",
-	"select": "orxP8a_select",
-	"testForm": "orxP8a_testForm",
-	"testLine": "orxP8a_testLine",
-	"testLineMatch": "orxP8a_testLineMatch",
-	"testLineSkip": "orxP8a_testLineSkip",
-	"testResults": "orxP8a_testResults",
-	"testRow": "orxP8a_testRow",
-	"timeline": "orxP8a_timeline",
-	"title": "orxP8a_title"
-};
-//#endregion
 //#region src/client/panel.tsx
 /**
 * Hooks drawer dashboard: execution-history timeline, status badges, and a
@@ -202,84 +161,84 @@ function HooksPanel({ onClose }) {
 		if (execute) refresh();
 	};
 	return /* @__PURE__ */ jsxs("aside", {
-		className: panel_module_default$1.panel,
+		className: "dh-panel",
 		"aria-label": "dsh-hooks 面板",
 		children: [/* @__PURE__ */ jsxs("header", {
-			className: panel_module_default$1.header,
+			className: "dh-header",
 			children: [
 				/* @__PURE__ */ jsx("h1", {
-					className: panel_module_default$1.title,
+					className: "dh-title",
 					children: "dsh-hooks"
 				}),
 				/* @__PURE__ */ jsx("span", {
-					className: panel_module_default$1.badges,
+					className: "dh-badges",
 					children: status !== null && /* @__PURE__ */ jsxs(Fragment, { children: [
 						/* @__PURE__ */ jsxs("span", {
-							className: panel_module_default$1.badge,
+							className: "dh-badge",
 							children: ["v", status.version]
 						}),
 						/* @__PURE__ */ jsxs("span", {
-							className: panel_module_default$1.badge,
+							className: "dh-badge",
 							children: [status.hookCount, " hooks"]
 						}),
 						/* @__PURE__ */ jsxs("span", {
-							className: panel_module_default$1.badge,
+							className: "dh-badge",
 							children: [status.historyCount, " 记录"]
 						})
 					] })
 				}),
 				/* @__PURE__ */ jsx("button", {
 					type: "button",
-					className: panel_module_default$1.close,
+					className: "dh-close",
 					onClick: onClose,
 					"aria-label": "关闭面板",
 					children: "✕"
 				})
 			]
 		}), /* @__PURE__ */ jsxs("div", {
-			className: panel_module_default$1.body,
+			className: "dh-body",
 			children: [
 				loadError && /* @__PURE__ */ jsx("div", {
-					className: panel_module_default$1.errorBanner,
+					className: "dh-error-banner",
 					children: "无法访问 /dsh-hooks/* 路由：请确认 dsh-hooks 核心插件已安装且 dsh web 已重启。"
 				}),
 				/* @__PURE__ */ jsxs("section", { children: [/* @__PURE__ */ jsx("h2", {
-					className: panel_module_default$1.sectionTitle,
+					className: "dh-section-title",
 					children: "执行历史（最近 50 条）"
 				}), history === null || history.length === 0 ? /* @__PURE__ */ jsx("div", {
-					className: panel_module_default$1.empty,
+					className: "dh-empty",
 					children: history === null ? "加载中…" : "暂无记录"
 				}) : /* @__PURE__ */ jsx("div", {
-					className: panel_module_default$1.timeline,
+					className: "dh-timeline",
 					children: [...history].reverse().map((record, index) => /* @__PURE__ */ jsx("div", {
-						className: panel_module_default$1.record,
+						className: "dh-record",
 						children: /* @__PURE__ */ jsxs("div", {
-							className: panel_module_default$1.recordMain,
+							className: "dh-record-main",
 							children: [
 								/* @__PURE__ */ jsxs("div", {
-									className: panel_module_default$1.recordTop,
+									className: "dh-record-top",
 									children: [
 										/* @__PURE__ */ jsx("span", {
-											className: panel_module_default$1.recordTime,
+											className: "dh-record-time",
 											children: formatTime(record.ts)
 										}),
 										/* @__PURE__ */ jsx("span", {
-											className: panel_module_default$1.recordEvent,
+											className: "dh-record-event",
 											children: record.event
 										}),
 										/* @__PURE__ */ jsx("span", {
-											className: `${panel_module_default$1.outcome} ${outcomeClass(record.outcome)}`,
+											className: `dh-outcome ${outcomeClass(record.outcome)}`,
 											children: outcomeLabel(record.outcome)
 										})
 									]
 								}),
 								/* @__PURE__ */ jsx("div", {
-									className: panel_module_default$1.recordCommand,
+									className: "dh-record-command",
 									title: record.command,
 									children: record.command
 								}),
 								record.error !== void 0 && record.error !== "" && /* @__PURE__ */ jsx("div", {
-									className: panel_module_default$1.recordError,
+									className: "dh-record-error",
 									children: record.error.slice(0, 200)
 								})
 							]
@@ -287,21 +246,21 @@ function HooksPanel({ onClose }) {
 					}, `${record.ts}-${index}`))
 				})] }),
 				/* @__PURE__ */ jsxs("section", { children: [/* @__PURE__ */ jsx("h2", {
-					className: panel_module_default$1.sectionTitle,
+					className: "dh-section-title",
 					children: "手动测试"
 				}), /* @__PURE__ */ jsxs("div", {
-					className: panel_module_default$1.testForm,
+					className: "dh-test-form",
 					children: [
 						/* @__PURE__ */ jsxs("div", {
-							className: panel_module_default$1.testRow,
+							className: "dh-test-row",
 							children: [
 								/* @__PURE__ */ jsxs("label", {
-									className: panel_module_default$1.field,
+									className: "dh-field",
 									children: [/* @__PURE__ */ jsx("span", {
-										className: panel_module_default$1.fieldLabel,
+										className: "dh-field-label",
 										children: "事件"
 									}), /* @__PURE__ */ jsx("select", {
-										className: panel_module_default$1.select,
+										className: "dh-select",
 										value: event,
 										onChange: (e) => setEvent(e.target.value),
 										children: EVENTS.map((name) => /* @__PURE__ */ jsx("option", {
@@ -311,24 +270,24 @@ function HooksPanel({ onClose }) {
 									})]
 								}),
 								event === "turn/end" && /* @__PURE__ */ jsxs("label", {
-									className: panel_module_default$1.field,
+									className: "dh-field",
 									children: [/* @__PURE__ */ jsx("span", {
-										className: panel_module_default$1.fieldLabel,
+										className: "dh-field-label",
 										children: "reason"
 									}), /* @__PURE__ */ jsx("input", {
-										className: panel_module_default$1.input,
+										className: "dh-input",
 										value: reason,
 										onChange: (e) => setReason(e.target.value),
 										placeholder: "completed"
 									})]
 								}),
 								/* @__PURE__ */ jsxs("label", {
-									className: panel_module_default$1.field,
+									className: "dh-field",
 									children: [/* @__PURE__ */ jsx("span", {
-										className: panel_module_default$1.fieldLabel,
+										className: "dh-field-label",
 										children: "tool（可选）"
 									}), /* @__PURE__ */ jsx("input", {
-										className: panel_module_default$1.input,
+										className: "dh-input",
 										value: tool,
 										onChange: (e) => setTool(e.target.value),
 										placeholder: "pwsh"
@@ -337,23 +296,23 @@ function HooksPanel({ onClose }) {
 							]
 						}),
 						/* @__PURE__ */ jsxs("div", {
-							className: panel_module_default$1.buttons,
+							className: "dh-buttons",
 							children: [/* @__PURE__ */ jsx("button", {
 								type: "button",
-								className: panel_module_default$1.button,
+								className: "dh-button",
 								onClick: () => void runTest(false),
 								children: "模拟（看匹配）"
 							}), /* @__PURE__ */ jsx("button", {
 								type: "button",
-								className: `${panel_module_default$1.button} ${panel_module_default$1.buttonPrimary}`,
+								className: `dh-button dh-button-primary`,
 								onClick: () => void runTest(true),
 								children: "执行（真实触发）"
 							})]
 						}),
 						testResult !== null && /* @__PURE__ */ jsxs("div", {
-							className: panel_module_default$1.testResults,
+							className: "dh-test-results",
 							children: [/* @__PURE__ */ jsxs("div", {
-								className: panel_module_default$1.testLine,
+								className: "dh-test-line",
 								children: [
 									testResult.event,
 									"：",
@@ -364,7 +323,7 @@ function HooksPanel({ onClose }) {
 									testResult.executed ? "（已执行）" : ""
 								]
 							}, "head"), testResult.lines.map((line) => /* @__PURE__ */ jsxs("div", {
-								className: `${panel_module_default$1.testLine} ${line.matched ? panel_module_default$1.testLineMatch : panel_module_default$1.testLineSkip}`,
+								className: `dh-test-line ${line.matched ? "dh-test-line-match" : "dh-test-line-skip"}`,
 								children: [
 									line.matched ? "✅" : "⏭",
 									" [",
@@ -383,15 +342,15 @@ function HooksPanel({ onClose }) {
 }
 function outcomeClass(outcome) {
 	switch (outcomeTone(outcome)) {
-		case "ok": return panel_module_default$1.outcomeOk;
-		case "bad": return panel_module_default$1.outcomeBad;
-		case "warn": return panel_module_default$1.outcomeWarn;
-		default: return panel_module_default$1.outcomeNeutral;
+		case "ok": return "dh-outcome-ok";
+		case "bad": return "dh-outcome-bad";
+		case "warn": return "dh-outcome-warn";
+		default: return "dh-outcome-neutral";
 	}
 }
 //#endregion
 //#region src/client/panel.module.css?inline
-var panel_module_default = ":root {\n  --dsh-hooks-panel-bg: #181a1ef7;\n  --dsh-hooks-panel-border: #ffffff14;\n  --dsh-hooks-text: #e6e6e6;\n  --dsh-hooks-muted: #9aa0a8;\n  --dsh-hooks-accent: #4d8df7;\n  --dsh-hooks-ok: #3fb56b;\n  --dsh-hooks-bad: #e5534b;\n  --dsh-hooks-warn: #d9a13c;\n}\n\n@media (prefers-color-scheme: light) {\n  :root {\n    --dsh-hooks-panel-bg: #fafafcfa;\n    --dsh-hooks-panel-border: #00000014;\n    --dsh-hooks-text: #26282c;\n    --dsh-hooks-muted: #767c85;\n  }\n}\n\n.panel {\n  z-index: 9998;\n  background: var(--dsh-hooks-panel-bg);\n  border-left: 1px solid var(--dsh-hooks-panel-border);\n  width: 380px;\n  max-width: 92vw;\n  color: var(--dsh-hooks-text);\n  flex-direction: column;\n  font-size: 13px;\n  line-height: 1.5;\n  display: flex;\n  position: fixed;\n  top: 0;\n  bottom: 0;\n  right: 0;\n  box-shadow: -8px 0 24px #0000002e;\n}\n\n.header {\n  border-bottom: 1px solid var(--dsh-hooks-panel-border);\n  align-items: center;\n  gap: 8px;\n  padding: 12px 14px;\n  display: flex;\n}\n\n.title {\n  flex: 1;\n  margin: 0;\n  font-size: 14px;\n  font-weight: 600;\n}\n\n.badges {\n  gap: 6px;\n  display: flex;\n}\n\n.badge {\n  color: var(--dsh-hooks-muted);\n  white-space: nowrap;\n  background: #80849029;\n  border-radius: 9px;\n  padding: 1px 7px;\n  font-size: 11px;\n}\n\n.close {\n  color: var(--dsh-hooks-muted);\n  cursor: pointer;\n  background: none;\n  border: none;\n  border-radius: 4px;\n  padding: 2px 6px;\n  font-size: 16px;\n}\n\n.close:hover {\n  color: var(--dsh-hooks-text);\n  background: #8084902e;\n}\n\n.body {\n  flex-direction: column;\n  flex: 1;\n  gap: 14px;\n  padding: 12px 14px;\n  display: flex;\n  overflow-y: auto;\n}\n\n.sectionTitle {\n  color: var(--dsh-hooks-muted);\n  text-transform: uppercase;\n  letter-spacing: .04em;\n  margin: 0 0 8px;\n  font-size: 12px;\n  font-weight: 600;\n}\n\n.timeline {\n  flex-direction: column;\n  gap: 6px;\n  display: flex;\n}\n\n.record {\n  border: 1px solid var(--dsh-hooks-panel-border);\n  border-radius: 6px;\n  gap: 8px;\n  padding: 7px 9px;\n  display: flex;\n}\n\n.recordMain {\n  flex: 1;\n  min-width: 0;\n}\n\n.recordTop {\n  align-items: baseline;\n  gap: 6px;\n  display: flex;\n}\n\n.recordTime {\n  color: var(--dsh-hooks-muted);\n  white-space: nowrap;\n  font-size: 11px;\n}\n\n.recordEvent {\n  white-space: nowrap;\n  text-overflow: ellipsis;\n  font-weight: 600;\n  overflow: hidden;\n}\n\n.recordCommand {\n  color: var(--dsh-hooks-muted);\n  white-space: nowrap;\n  text-overflow: ellipsis;\n  text-align: left;\n  direction: rtl;\n  font-size: 12px;\n  overflow: hidden;\n}\n\n.outcome {\n  white-space: nowrap;\n  border-radius: 9px;\n  align-self: flex-start;\n  padding: 1px 7px;\n  font-size: 11px;\n}\n\n.outcomeOk {\n  color: var(--dsh-hooks-ok);\n  background: #3fb56b29;\n}\n\n.outcomeBad {\n  color: var(--dsh-hooks-bad);\n  background: #e5534b29;\n}\n\n.outcomeWarn {\n  color: var(--dsh-hooks-warn);\n  background: #d9a13c29;\n}\n\n.outcomeNeutral {\n  color: var(--dsh-hooks-muted);\n  background: #80849029;\n}\n\n.recordError {\n  color: var(--dsh-hooks-bad);\n  white-space: pre-wrap;\n  word-break: break-all;\n  margin-top: 4px;\n  font-size: 11px;\n}\n\n.empty {\n  color: var(--dsh-hooks-muted);\n  padding: 6px 2px;\n  font-size: 12px;\n}\n\n.testForm {\n  flex-direction: column;\n  gap: 8px;\n  display: flex;\n}\n\n.testRow {\n  gap: 8px;\n  display: flex;\n}\n\n.field {\n  flex-direction: column;\n  flex: 1;\n  gap: 3px;\n  display: flex;\n}\n\n.fieldLabel {\n  color: var(--dsh-hooks-muted);\n  font-size: 11px;\n}\n\n.input, .select {\n  border: 1px solid var(--dsh-hooks-panel-border);\n  color: var(--dsh-hooks-text);\n  background: #8084901f;\n  border-radius: 5px;\n  outline: none;\n  padding: 5px 8px;\n  font-size: 12px;\n}\n\n.input:focus, .select:focus {\n  border-color: var(--dsh-hooks-accent);\n}\n\n.buttons {\n  gap: 8px;\n  display: flex;\n}\n\n.button {\n  border: 1px solid var(--dsh-hooks-panel-border);\n  color: var(--dsh-hooks-text);\n  cursor: pointer;\n  background: #8084901f;\n  border-radius: 5px;\n  padding: 5px 12px;\n  font-size: 12px;\n}\n\n.button:hover {\n  background: #80849038;\n}\n\n.buttonPrimary {\n  background: var(--dsh-hooks-accent);\n  border-color: var(--dsh-hooks-accent);\n  color: #fff;\n}\n\n.buttonPrimary:hover {\n  background: #3c7de8;\n}\n\n.testResults {\n  flex-direction: column;\n  gap: 4px;\n  display: flex;\n}\n\n.testLine {\n  border-radius: 5px;\n  padding: 4px 8px;\n  font-size: 12px;\n}\n\n.testLineMatch {\n  color: var(--dsh-hooks-ok);\n  background: #3fb56b24;\n}\n\n.testLineSkip {\n  color: var(--dsh-hooks-muted);\n  background: #8084901a;\n}\n\n.errorBanner {\n  color: var(--dsh-hooks-bad);\n  background: #e5534b1f;\n  border: 1px solid #e5534b66;\n  border-radius: 6px;\n  padding: 8px 10px;\n  font-size: 12px;\n}\n";
+var panel_module_default = ":root {\n  --dsh-hooks-panel-bg: #181a1ef7;\n  --dsh-hooks-panel-border: #ffffff14;\n  --dsh-hooks-text: #e6e6e6;\n  --dsh-hooks-muted: #9aa0a8;\n  --dsh-hooks-accent: #4d8df7;\n  --dsh-hooks-ok: #3fb56b;\n  --dsh-hooks-bad: #e5534b;\n  --dsh-hooks-warn: #d9a13c;\n}\n\n@media (prefers-color-scheme: light) {\n  :root {\n    --dsh-hooks-panel-bg: #fafafcfa;\n    --dsh-hooks-panel-border: #00000014;\n    --dsh-hooks-text: #26282c;\n    --dsh-hooks-muted: #767c85;\n  }\n}\n\n.dh-panel {\n  z-index: 9998;\n  background: var(--dsh-hooks-panel-bg);\n  border-left: 1px solid var(--dsh-hooks-panel-border);\n  width: 380px;\n  max-width: 92vw;\n  color: var(--dsh-hooks-text);\n  flex-direction: column;\n  font-size: 13px;\n  line-height: 1.5;\n  display: flex;\n  position: fixed;\n  top: 0;\n  bottom: 0;\n  right: 0;\n  box-shadow: -8px 0 24px #0000002e;\n}\n\n.dh-header {\n  border-bottom: 1px solid var(--dsh-hooks-panel-border);\n  align-items: center;\n  gap: 8px;\n  padding: 12px 14px;\n  display: flex;\n}\n\n.dh-title {\n  flex: 1;\n  margin: 0;\n  font-size: 14px;\n  font-weight: 600;\n}\n\n.dh-badges {\n  gap: 6px;\n  display: flex;\n}\n\n.dh-badge {\n  color: var(--dsh-hooks-muted);\n  white-space: nowrap;\n  background: #80849029;\n  border-radius: 9px;\n  padding: 1px 7px;\n  font-size: 11px;\n}\n\n.dh-close {\n  color: var(--dsh-hooks-muted);\n  cursor: pointer;\n  background: none;\n  border: none;\n  border-radius: 4px;\n  padding: 2px 6px;\n  font-size: 16px;\n}\n\n.dh-close:hover {\n  color: var(--dsh-hooks-text);\n  background: #8084902e;\n}\n\n.dh-body {\n  flex-direction: column;\n  flex: 1;\n  gap: 14px;\n  padding: 12px 14px;\n  display: flex;\n  overflow-y: auto;\n}\n\n.dh-section-title {\n  color: var(--dsh-hooks-muted);\n  text-transform: uppercase;\n  letter-spacing: .04em;\n  margin: 0 0 8px;\n  font-size: 12px;\n  font-weight: 600;\n}\n\n.dh-timeline {\n  flex-direction: column;\n  gap: 6px;\n  display: flex;\n}\n\n.dh-record {\n  border: 1px solid var(--dsh-hooks-panel-border);\n  border-radius: 6px;\n  gap: 8px;\n  padding: 7px 9px;\n  display: flex;\n}\n\n.dh-record-main {\n  flex: 1;\n  min-width: 0;\n}\n\n.dh-record-top {\n  align-items: baseline;\n  gap: 6px;\n  display: flex;\n}\n\n.dh-record-time {\n  color: var(--dsh-hooks-muted);\n  white-space: nowrap;\n  font-size: 11px;\n}\n\n.dh-record-event {\n  white-space: nowrap;\n  text-overflow: ellipsis;\n  font-weight: 600;\n  overflow: hidden;\n}\n\n.dh-record-command {\n  color: var(--dsh-hooks-muted);\n  white-space: nowrap;\n  text-overflow: ellipsis;\n  text-align: left;\n  direction: rtl;\n  font-size: 12px;\n  overflow: hidden;\n}\n\n.dh-outcome {\n  white-space: nowrap;\n  border-radius: 9px;\n  align-self: flex-start;\n  padding: 1px 7px;\n  font-size: 11px;\n}\n\n.dh-outcome-ok {\n  color: var(--dsh-hooks-ok);\n  background: #3fb56b29;\n}\n\n.dh-outcome-bad {\n  color: var(--dsh-hooks-bad);\n  background: #e5534b29;\n}\n\n.dh-outcome-warn {\n  color: var(--dsh-hooks-warn);\n  background: #d9a13c29;\n}\n\n.dh-outcome-neutral {\n  color: var(--dsh-hooks-muted);\n  background: #80849029;\n}\n\n.dh-record-error {\n  color: var(--dsh-hooks-bad);\n  white-space: pre-wrap;\n  word-break: break-all;\n  margin-top: 4px;\n  font-size: 11px;\n}\n\n.dh-empty {\n  color: var(--dsh-hooks-muted);\n  padding: 6px 2px;\n  font-size: 12px;\n}\n\n.dh-test-form {\n  flex-direction: column;\n  gap: 8px;\n  display: flex;\n}\n\n.dh-test-row {\n  gap: 8px;\n  display: flex;\n}\n\n.dh-field {\n  flex-direction: column;\n  flex: 1;\n  gap: 3px;\n  display: flex;\n}\n\n.dh-field-label {\n  color: var(--dsh-hooks-muted);\n  font-size: 11px;\n}\n\n.dh-input, .dh-select {\n  border: 1px solid var(--dsh-hooks-panel-border);\n  color: var(--dsh-hooks-text);\n  background: #8084901f;\n  border-radius: 5px;\n  outline: none;\n  padding: 5px 8px;\n  font-size: 12px;\n}\n\n.dh-input:focus, .dh-select:focus {\n  border-color: var(--dsh-hooks-accent);\n}\n\n.dh-buttons {\n  gap: 8px;\n  display: flex;\n}\n\n.dh-button {\n  border: 1px solid var(--dsh-hooks-panel-border);\n  color: var(--dsh-hooks-text);\n  cursor: pointer;\n  background: #8084901f;\n  border-radius: 5px;\n  padding: 5px 12px;\n  font-size: 12px;\n}\n\n.dh-button:hover {\n  background: #80849038;\n}\n\n.dh-button-primary {\n  background: var(--dsh-hooks-accent);\n  border-color: var(--dsh-hooks-accent);\n  color: #fff;\n}\n\n.dh-button-primary:hover {\n  background: #3c7de8;\n}\n\n.dh-test-results {\n  flex-direction: column;\n  gap: 4px;\n  display: flex;\n}\n\n.dh-test-line {\n  border-radius: 5px;\n  padding: 4px 8px;\n  font-size: 12px;\n}\n\n.dh-test-line-match {\n  color: var(--dsh-hooks-ok);\n  background: #3fb56b24;\n}\n\n.dh-test-line-skip {\n  color: var(--dsh-hooks-muted);\n  background: #8084901a;\n}\n\n.dh-error-banner {\n  color: var(--dsh-hooks-bad);\n  background: #e5534b1f;\n  border: 1px solid #e5534b66;\n  border-radius: 6px;\n  padding: 8px 10px;\n  font-size: 12px;\n}\n";
 //#endregion
 //#region src/client/panel-mount.tsx
 /**

@@ -16,7 +16,6 @@ import {
   type StatusInfo,
   type TestResult,
 } from './api.ts'
-import css from './panel.module.css'
 
 const EVENTS = [
   'turn/start',
@@ -73,51 +72,51 @@ export function HooksPanel({ onClose }: HooksPanelProps) {
   }
 
   return (
-    <aside className={css.panel} aria-label="dsh-hooks 面板">
-      <header className={css.header}>
-        <h1 className={css.title}>dsh-hooks</h1>
-        <span className={css.badges}>
+    <aside className={'dh-panel'} aria-label="dsh-hooks 面板">
+      <header className={'dh-header'}>
+        <h1 className={'dh-title'}>dsh-hooks</h1>
+        <span className={'dh-badges'}>
           {status !== null && (
             <>
-              <span className={css.badge}>v{status.version}</span>
-              <span className={css.badge}>{status.hookCount} hooks</span>
-              <span className={css.badge}>{status.historyCount} 记录</span>
+              <span className={'dh-badge'}>v{status.version}</span>
+              <span className={'dh-badge'}>{status.hookCount} hooks</span>
+              <span className={'dh-badge'}>{status.historyCount} 记录</span>
             </>
           )}
         </span>
-        <button type="button" className={css.close} onClick={onClose} aria-label="关闭面板">
+        <button type="button" className={'dh-close'} onClick={onClose} aria-label="关闭面板">
           ✕
         </button>
       </header>
 
-      <div className={css.body}>
+      <div className={'dh-body'}>
         {loadError && (
-          <div className={css.errorBanner}>
+          <div className={'dh-error-banner'}>
             无法访问 /dsh-hooks/* 路由：请确认 dsh-hooks 核心插件已安装且 dsh web 已重启。
           </div>
         )}
 
         <section>
-          <h2 className={css.sectionTitle}>执行历史（最近 50 条）</h2>
+          <h2 className={'dh-section-title'}>执行历史（最近 50 条）</h2>
           {history === null || history.length === 0 ? (
-            <div className={css.empty}>{history === null ? '加载中…' : '暂无记录'}</div>
+            <div className={'dh-empty'}>{history === null ? '加载中…' : '暂无记录'}</div>
           ) : (
-            <div className={css.timeline}>
+            <div className={'dh-timeline'}>
               {[...history].reverse().map((record, index) => (
-                <div className={css.record} key={`${record.ts}-${index}`}>
-                  <div className={css.recordMain}>
-                    <div className={css.recordTop}>
-                      <span className={css.recordTime}>{formatTime(record.ts)}</span>
-                      <span className={css.recordEvent}>{record.event}</span>
-                      <span className={`${css.outcome} ${outcomeClass(record.outcome)}`}>
+                <div className={'dh-record'} key={`${record.ts}-${index}`}>
+                  <div className={'dh-record-main'}>
+                    <div className={'dh-record-top'}>
+                      <span className={'dh-record-time'}>{formatTime(record.ts)}</span>
+                      <span className={'dh-record-event'}>{record.event}</span>
+                      <span className={`${'dh-outcome'} ${outcomeClass(record.outcome)}`}>
                         {outcomeLabel(record.outcome)}
                       </span>
                     </div>
-                    <div className={css.recordCommand} title={record.command}>
+                    <div className={'dh-record-command'} title={record.command}>
                       {record.command}
                     </div>
                     {record.error !== undefined && record.error !== '' && (
-                      <div className={css.recordError}>{record.error.slice(0, 200)}</div>
+                      <div className={'dh-record-error'}>{record.error.slice(0, 200)}</div>
                     )}
                   </div>
                 </div>
@@ -127,12 +126,12 @@ export function HooksPanel({ onClose }: HooksPanelProps) {
         </section>
 
         <section>
-          <h2 className={css.sectionTitle}>手动测试</h2>
-          <div className={css.testForm}>
-            <div className={css.testRow}>
-              <label className={css.field}>
-                <span className={css.fieldLabel}>事件</span>
-                <select className={css.select} value={event} onChange={(e) => setEvent(e.target.value)}>
+          <h2 className={'dh-section-title'}>手动测试</h2>
+          <div className={'dh-test-form'}>
+            <div className={'dh-test-row'}>
+              <label className={'dh-field'}>
+                <span className={'dh-field-label'}>事件</span>
+                <select className={'dh-select'} value={event} onChange={(e) => setEvent(e.target.value)}>
                   {EVENTS.map((name) => (
                     <option key={name} value={name}>
                       {name}
@@ -141,44 +140,44 @@ export function HooksPanel({ onClose }: HooksPanelProps) {
                 </select>
               </label>
               {event === 'turn/end' && (
-                <label className={css.field}>
-                  <span className={css.fieldLabel}>reason</span>
+                <label className={'dh-field'}>
+                  <span className={'dh-field-label'}>reason</span>
                   <input
-                    className={css.input}
+                    className={'dh-input'}
                     value={reason}
                     onChange={(e) => setReason(e.target.value)}
                     placeholder="completed"
                   />
                 </label>
               )}
-              <label className={css.field}>
-                <span className={css.fieldLabel}>tool（可选）</span>
+              <label className={'dh-field'}>
+                <span className={'dh-field-label'}>tool（可选）</span>
                 <input
-                  className={css.input}
+                  className={'dh-input'}
                   value={tool}
                   onChange={(e) => setTool(e.target.value)}
                   placeholder="pwsh"
                 />
               </label>
             </div>
-            <div className={css.buttons}>
-              <button type="button" className={css.button} onClick={() => void runTest(false)}>
+            <div className={'dh-buttons'}>
+              <button type="button" className={'dh-button'} onClick={() => void runTest(false)}>
                 模拟（看匹配）
               </button>
-              <button type="button" className={`${css.button} ${css.buttonPrimary}`} onClick={() => void runTest(true)}>
+              <button type="button" className={`dh-button dh-button-primary`} onClick={() => void runTest(true)}>
                 执行（真实触发）
               </button>
             </div>
             {testResult !== null && (
-              <div className={css.testResults}>
-                <div className={css.testLine} key="head">
+              <div className={'dh-test-results'}>
+                <div className={'dh-test-line'} key="head">
                   {testResult.event}：{testResult.matched}/{testResult.total} 个 hook 触发
                   {testResult.executed ? '（已执行）' : ''}
                 </div>
                 {testResult.lines.map((line) => (
                   <div
                     key={line.index}
-                    className={`${css.testLine} ${line.matched ? css.testLineMatch : css.testLineSkip}`}
+                    className={`${'dh-test-line'} ${line.matched ? 'dh-test-line-match' : 'dh-test-line-skip'}`}
                   >
                     {line.matched ? '✅' : '⏭'} [{line.index}] {line.summary}
                     {!line.matched && line.why !== '' ? ` —— ${line.why}` : ''}
@@ -197,12 +196,12 @@ function outcomeClass(outcome: string): string {
   const tone = outcomeTone(outcome)
   switch (tone) {
     case 'ok':
-      return css.outcomeOk
+      return 'dh-outcome-ok'
     case 'bad':
-      return css.outcomeBad
+      return 'dh-outcome-bad'
     case 'warn':
-      return css.outcomeWarn
+      return 'dh-outcome-warn'
     default:
-      return css.outcomeNeutral
+      return 'dh-outcome-neutral'
   }
 }
