@@ -1,9 +1,9 @@
 /**
- * @PeterBon/dsh-hooks-ui — browser half: a plugin page registered into the
- * official Plugins settings section (`settings.plugins.tab` slot, declared by
- * the settings domain). The page shows the core plugin's status, the
- * execution-history timeline, and a manual event tester, all served by the
- * core's /dsh-hooks/* routes.
+ * @PeterBon/dsh-hooks-ui — browser half: a top-level settings section named
+ * "Hooks" (`settings.section` slot, declared by the settings domain) — sits
+ * beside General / Plugins in the settings navigation. The section shows the
+ * core plugin's status, the execution-history timeline, and a manual event
+ * tester, all served by the core's /dsh-hooks/* routes.
  *
  * Failure policy matches the task-board precedent: registration problems are
  * logged, never thrown — a plugin apply that throws fails the whole web
@@ -32,10 +32,10 @@ export function apply(ctx: ClientContext): void {
   injectCardStyle()
 
   try {
-    ctx.slots.inject('settings.plugins.tab', () => {
+    ctx.slots.inject('settings.section', () => {
       const unregister = ctx.slots.register(
         {
-          name: 'settings.plugins.tab',
+          name: 'settings.section',
           id: 'dsh-hooks',
           order: 100,
           label: 'Hooks',

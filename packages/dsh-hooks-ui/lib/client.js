@@ -329,9 +329,9 @@ window.__ModuleLoader__.load({
 			applied = true;
 			injectCardStyle();
 			try {
-				ctx.slots.inject("settings.plugins.tab", () => {
+				ctx.slots.inject("settings.section", () => {
 					const unregister = ctx.slots.register({
-						name: "settings.plugins.tab",
+						name: "settings.section",
 						id: "dsh-hooks",
 						order: 100,
 						label: "Hooks"
