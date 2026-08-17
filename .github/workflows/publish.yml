@@ -1,11 +1,8 @@
 name: Publish
 
-# Tag conventions: `vX.Y.Z` publishes the core dsh-hooks package at the repo
-# root; `dsh-hooks-ui@vX.Y.Z` publishes the dsh-hooks-ui panel
-# package under packages/.
 on:
   push:
-    tags: ['v*', 'dsh-hooks-ui@v*']
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -36,8 +33,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # One gate for both packages: the root check covers the core package
-      # and the workspace's UI package tests.
       - run: pnpm run check
 
       # Node 22 bundles npm 10, which has no automatic GitHub OIDC exchange
@@ -59,20 +54,10 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        shell: bash
         run: |
-          TAG="${{ github.ref_name }}"
-          if [[ "$TAG" == dsh-hooks-ui@* ]]; then
-            PKG_DIR="packages/dsh-hooks-ui"
-            PKG_NAME="dsh-hooks-ui"
-          else
-            PKG_DIR="."
-            PKG_NAME="dsh-hooks"
-          fi
-          cd "$PKG_DIR"
           VERSION=$(node -p "require('./package.json').version")
-          if npm view "$PKG_NAME@$VERSION" version >/dev/null 2>&1; then
-            echo "$PKG_NAME@$VERSION already on npm — skipping publish"
+          if npm view "dsh-hooks@$VERSION" version >/dev/null 2>&1; then
+            echo "dsh-hooks@$VERSION already on npm — skipping publish"
           elif [ -n "$NODE_AUTH_TOKEN" ]; then
             npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
             npm publish --access public

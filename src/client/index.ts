@@ -1,9 +1,9 @@
 /**
- * dsh-hooks-ui — browser half: a top-level settings section named
+ * dsh-hooks — browser half: a top-level settings section named
  * "Hooks" (`settings.section` slot, declared by the settings domain) — sits
  * beside General / Plugins in the settings navigation. The section shows the
- * core plugin's status, the execution-history timeline, and a manual event
- * tester, all served by the core's /dsh-hooks/* routes.
+ * plugin's status, the execution-history timeline, and a manual event
+ * tester, all served by the host half's /dsh-hooks/* routes.
  *
  * Failure policy matches the task-board precedent: registration problems are
  * logged, never thrown — a plugin apply that throws fails the whole web
@@ -14,7 +14,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { HooksSettingsCard } from './settings-card.tsx'
 import cardCss from './settings-card.module.css?inline'
 
-export const name = 'dsh-hooks-ui'
+export const name = 'dsh-hooks'
 
 /** Required services: the slot registry must be up before this plugin applies. */
 export const inject = ['slots'] as const
