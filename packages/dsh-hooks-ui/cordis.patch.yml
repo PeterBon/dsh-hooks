@@ -1,6 +1,6 @@
 # dsh-hooks-ui bundle patch: inserts the dual-face plugin row into the web
 # profile roster. Install with
-# `dsh plugin --profile web add @PeterBon/dsh-hooks-ui`.
+# `dsh plugin --profile web add dsh-hooks-ui`.
 #
 # The host half (exports ".") is a minimal no-op — the /dsh-hooks/* routes
 # this panel consumes are registered by the dsh-hooks core plugin. The
@@ -9,4 +9,4 @@
 # drawer dashboard.
 - insert:
     - id: ui-dsh-hooks-panel
-      name: '@PeterBon/dsh-hooks-ui'
+      name: 'dsh-hooks-ui'

@@ -1,7 +1,7 @@
 name: Publish
 
 # Tag conventions: `vX.Y.Z` publishes the core dsh-hooks package at the repo
-# root; `dsh-hooks-ui@vX.Y.Z` publishes the @PeterBon/dsh-hooks-ui panel
+# root; `dsh-hooks-ui@vX.Y.Z` publishes the dsh-hooks-ui panel
 # package under packages/.
 on:
   push:
@@ -64,7 +64,7 @@ jobs:
           TAG="${{ github.ref_name }}"
           if [[ "$TAG" == dsh-hooks-ui@* ]]; then
             PKG_DIR="packages/dsh-hooks-ui"
-            PKG_NAME="@PeterBon/dsh-hooks-ui"
+            PKG_NAME="dsh-hooks-ui"
           else
             PKG_DIR="."
             PKG_NAME="dsh-hooks"

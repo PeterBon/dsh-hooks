@@ -41,7 +41,7 @@ jobs:
 
       # The Web GUI panel package (workspace member) keeps its own check
       # chain: typecheck + tests + tsdown build.
-      - run: pnpm --filter @PeterBon/dsh-hooks-ui run check
+      - run: pnpm --filter dsh-hooks-ui run check
 
       # lib/ is committed for git-hosted installs (they never build). Fail
       # when the committed copy drifts from a clean build — both the core

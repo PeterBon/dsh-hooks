@@ -1,6 +1,6 @@
 import { defineConfig } from 'tsdown'
 
-const id = '@PeterBon/dsh-hooks-ui'
+const id = 'dsh-hooks-ui'
 
 /**
  * Two build faces (dsh-web-ui shared-preset pattern):
