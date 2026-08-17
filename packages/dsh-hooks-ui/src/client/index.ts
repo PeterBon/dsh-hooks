@@ -15,6 +15,9 @@ import cardCss from './settings-card.module.css?inline'
 
 export const name = '@PeterBon/dsh-hooks-ui'
 
+/** Required services: the slot registry must be up before this plugin applies. */
+export const inject = ['slots'] as const
+
 const STYLE_ID = 'dsh-hooks-ui-style'
 
 declare module '@deepseek-ai/dsh-client-ui-slots' {
