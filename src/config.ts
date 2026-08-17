@@ -41,10 +41,30 @@ export interface HookSpec {
    * (`completed`, `error`, …). Ignored for other events.
    */
   when?: TurnEndReasonKind
+  /**
+   * Optional field → regex filters: every declared regex must match the
+   * context's field value for the hook to run. Fields are `HookContext`
+   * keys (`tool`, `sessionName`, `sessionId`, `error`, `source`, `cwd`,
+   * `content`, …); a field absent from the context never matches.
+   */
+  match?: Record<string, RegExp>
   /** Command to spawn through the platform shell. */
   run: string
+  /**
+   * How the context reaches the command. `env` (default) passes the
+   * `DSH_HOOK_*` variables only; `stdin` additionally writes the full
+   * context as one JSON document to the command's stdin.
+   */
+  input?: 'env' | 'stdin'
   /** Per-hook timeout in milliseconds. Defaults to 10000. */
   timeoutMs?: number
+  /**
+   * Retry count for non-zero exit codes (default 0: fire-and-forget,
+   * never retried). Spawn failures and timeouts are never retried.
+   */
+  retries?: number
+  /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
+  retryDelayMs?: number
 }
 
 export interface Config {
@@ -67,8 +87,16 @@ export const Config: {
       when: Schema.union([...TURN_END_REASONS]).description(
         '可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted）；其他事件忽略该字段',
       ),
+      match: Schema.dict(Schema.regExp()).description(
+        '可选通用过滤：字段 → 正则，全部匹配才触发。字段为上下文键（tool/sessionName/sessionId/error/source/cwd/content/reason/…），上下文中不存在的字段视为不匹配',
+      ),
       run: Schema.string().required().description('触发时通过系统 shell 执行的命令'),
+      input: Schema.union(['env', 'stdin'] as const)
+        .default('env')
+        .description('上下文传递方式：env 只传 DSH_HOOK_* 环境变量（默认）；stdin 额外把完整上下文 JSON 写入命令标准输入'),
       timeoutMs: Schema.number().default(10000).description('单次执行超时（毫秒）'),
+      retries: Schema.natural().default(0).description('非零退出码的重试次数（默认 0 不重试；spawn 失败与超时不重试）'),
+      retryDelayMs: Schema.natural().default(500).description('重试基础间隔（毫秒），每次翻倍'),
     }).description('一个事件 → 命令的 hook 声明'),
   )
     .default([])

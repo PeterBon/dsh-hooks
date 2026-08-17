@@ -197,6 +197,24 @@ export function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndR
   return spec.when === reasonKind
 }
 
+/**
+ * Apply the optional `match` field → regex filters. Every declared regex
+ * must match its context field (String-coerced); a field the context does
+ * not carry never matches. An empty/absent `match` passes everything.
+ * RegExps come pre-compiled from the config schema; non-RegExp entries are
+ * rejected defensively (never match).
+ */
+export function matchFilters(match: Record<string, RegExp> | undefined, ctx: HookContext): boolean {
+  if (match === undefined) return true
+  for (const [field, pattern] of Object.entries(match)) {
+    if (!(pattern instanceof RegExp)) return false
+    const value = (ctx as unknown as Record<string, unknown>)[field]
+    if (value === undefined) return false
+    if (!pattern.test(String(value))) return false
+  }
+  return true
+}
+
 function baseContext(session: Session, event: string): HookContext {
   return {
     event,

@@ -8,6 +8,7 @@ import {
   classifySessionEvent,
   errorText,
   hookMatches,
+  matchFilters,
   sessionCreatedContext,
   sessionDisposedContext,
   sessionTitle,
@@ -413,5 +414,40 @@ describe('turnEndContext usage enrichment', () => {
     const ctx = turnEndContext(fakeSession('s1'), 1, 'completed')
     expect(ctx.usageInputTokens).toBeUndefined()
     expect(ctx.usageOutputTokens).toBeUndefined()
+  })
+})
+
+describe('matchFilters', () => {
+  const ctx = {
+    event: 'tool/call',
+    sessionId: 'sess-1',
+    sessionName: '修复构建',
+    tool: 'pwsh',
+    error: 'upstream timeout',
+    timestamp: 'T',
+  }
+
+  it('passes when match is absent or empty', () => {
+    expect(matchFilters(undefined, ctx)).toBe(true)
+    expect(matchFilters({}, ctx)).toBe(true)
+  })
+
+  it('requires every declared regex to match its field', () => {
+    expect(matchFilters({ tool: /^pw/ }, ctx)).toBe(true)
+    expect(matchFilters({ tool: /^pw/, sessionName: /构建/ }, ctx)).toBe(true)
+    expect(matchFilters({ tool: /^pw/, sessionName: /不存在的名字/ }, ctx)).toBe(false)
+  })
+
+  it('rejects when a field is absent from the context', () => {
+    expect(matchFilters({ reason: /completed/ }, ctx)).toBe(false)
+  })
+
+  it('coerces non-string fields to string for the test', () => {
+    const numbered = { event: 'turn/end', turn: 7, timestamp: 'T' }
+    expect(matchFilters({ turn: /^7$/ }, numbered)).toBe(true)
+  })
+
+  it('rejects non-RegExp patterns defensively', () => {
+    expect(matchFilters({ tool: '^pw' as unknown as RegExp }, ctx)).toBe(false)
   })
 })

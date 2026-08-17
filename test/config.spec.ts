@@ -73,4 +73,29 @@ describe('Config schema', () => {
       expect(TURN_END_REASONS).toContain(kind)
     }
   })
+
+  it('compiles match regexes and defaults the execution fields', () => {
+    const result = Config({
+      hooks: [{ on: 'tool/call', match: { tool: '^pw', sessionName: '构建' }, run: 'x' }],
+    })
+    expect(result.hooks?.[0]?.match?.tool).toBeInstanceOf(RegExp)
+    expect(result.hooks?.[0]?.input).toBe('env')
+    expect(result.hooks?.[0]?.retries).toBe(0)
+    expect(result.hooks?.[0]?.retryDelayMs).toBe(500)
+  })
+
+  it('rejects an invalid match regex', () => {
+    expect(() => Config({ hooks: [{ on: 'tool/call', match: { tool: '[' }, run: 'x' }] })).toThrow()
+  })
+
+  it('accepts the stdin input mode and rejects unknown modes', () => {
+    const result = Config({ hooks: [{ on: 'tool/call', input: 'stdin', run: 'x' }] })
+    expect(result.hooks?.[0]?.input).toBe('stdin')
+    expect(() => Config({ hooks: [{ on: 'tool/call', input: 'pipe' as never, run: 'x' }] })).toThrow()
+  })
+
+  it('accepts retries and retryDelayMs', () => {
+    const result = Config({ hooks: [{ on: 'turn/end', retries: 3, retryDelayMs: 1000, run: 'x' }] })
+    expect(result.hooks?.[0]).toMatchObject({ retries: 3, retryDelayMs: 1000 })
+  })
 })

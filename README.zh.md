@@ -31,7 +31,32 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
         timeoutMs: 10000             # 可选，默认 10000
       - on: 'approval/asked'
         run: 'powershell -Command "Add-Content hooks.log approval-requested"'
+      - on: 'tool/call'
+        match:                       # 可选：字段 → 正则，全部匹配才触发
+          tool: '^(rm|git|ssh)'
+        run: 'node examples/notify-webhook.mjs --slack'
+      - on: 'turn/end'
+        when: 'completed'
+        run: 'node examples/notify-feishu.mjs'
+        retries: 2                   # 可选：非零退出码重试（默认 0 不重试）
+        retryDelayMs: 1000           # 可选：重试基础间隔，每次翻倍（默认 500）
+      - on: 'turn/end'
+        input: 'stdin'               # 可选：把完整上下文 JSON 写入命令 stdin
+        run: 'node my-hook.mjs'
 ```
+
+每个 hook 的完整字段：
+
+| 字段 | 含义 | 默认 |
+| --- | --- | --- |
+| `on` | 触发事件（见上方事件表） | 必填 |
+| `when` | 对 `turn/end` 按结束原因过滤 | 全部原因 |
+| `match` | 字段 → 正则，全部匹配才触发；字段为上下文键（`tool`/`sessionName`/`sessionId`/`error`/`source`/`cwd`/`content`/`reason`…），上下文中不存在的字段视为不匹配 | 不过滤 |
+| `run` | 通过系统 shell 执行的命令 | 必填 |
+| `input` | `env` 只传 `DSH_HOOK_*` 环境变量；`stdin` 额外把完整上下文 JSON 写入命令标准输入 | `env` |
+| `timeoutMs` | 单次执行超时（毫秒），超时终止进程树 | 10000 |
+| `retries` | 非零退出码的重试次数（spawn 失败与超时不重试） | 0 |
+| `retryDelayMs` | 重试基础间隔（毫秒），每次翻倍 | 500 |
 
 ## 事件（v1）
 
@@ -56,7 +81,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 
 ## 命令执行
 
-- 每个命中的 hook 通过系统 shell 执行 `run`，**fire-and-forget**：失败只 `console.warn`，绝不重试、绝不阻塞 agent 循环。
+- 每个命中的 hook 通过系统 shell 执行 `run`，**fire-and-forget**：失败只 `console.warn`、默认不重试（`retries` 可 opt-in 后台重试非零退出码）、绝不阻塞 agent 循环。命令的 stdout/stderr 会被捕获（各 64 KiB 上限），非零退出码时把 stderr 尾部写进告警日志。
 - 上下文通过**环境变量**传递（数据不拼接进 shell 字符串，防注入）：
 
 | 变量 | 含义 |
