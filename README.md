@@ -43,6 +43,15 @@ Add a config block to your profile's `cordis.patch.yml`:
       - on: 'turn/end'
         input: 'stdin'               # optional: write the full context JSON to stdin
         run: 'node my-hook.mjs'
+      - on: 'approval/asked'
+        notify:                      # built-in notification: instead of run, no script needed
+          channel: 'desktop'         # platform balloon/toast
+      - on: 'turn/end'
+        when: 'completed'
+        notify:
+          channel: 'webhook'         # POST JSON to any HTTP endpoint
+          url: 'https://hooks.slack.com/services/…'
+          slack: true                # optional: { text } one-line summary (Slack style)
 ```
 
 Every hook field:
@@ -52,7 +61,8 @@ Every hook field:
 | `on` | triggering event (see the event table) | required |
 | `when` | filter `turn/end` by end reason | all reasons |
 | `match` | field → regex, all must match; fields are context keys (`tool` / `sessionName` / `sessionId` / `error` / `source` / `cwd` / `content` / `reason`, …), a field absent from the context never matches | no filter |
-| `run` | command spawned through the platform shell | required |
+| `run` | command spawned through the platform shell (exactly one of `run` / `notify`) | one of the two required |
+| `notify` | built-in notification (exactly one of `run` / `notify`): `channel: webhook` (HTTP JSON; omit `url` to use `DSH_HOOKS_WEBHOOK_URL`, `slack: true` for a one-line summary) or `channel: desktop` (platform balloon/toast) | one of the two required |
 | `input` | `env` passes only the `DSH_HOOK_*` variables; `stdin` additionally writes the full context JSON to the command's stdin | `env` |
 | `timeoutMs` | per-run timeout (ms); the process tree is terminated on expiry | 10000 |
 | `retries` | retry count for non-zero exit codes (spawn failures and timeouts never retry) | 0 |

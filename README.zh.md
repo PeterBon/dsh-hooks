@@ -43,6 +43,15 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
       - on: 'turn/end'
         input: 'stdin'               # 可选：把完整上下文 JSON 写入命令 stdin
         run: 'node my-hook.mjs'
+      - on: 'approval/asked'
+        notify:                      # 内置通知：与 run 二选一，无需外部脚本
+          channel: 'desktop'         # 桌面气泡/toast 通知
+      - on: 'turn/end'
+        when: 'completed'
+        notify:
+          channel: 'webhook'         # POST JSON 到任意 HTTP 端点
+          url: 'https://hooks.slack.com/services/…'
+          slack: true                # 可选：改为 { text } 单行摘要（Slack 风格）
 ```
 
 每个 hook 的完整字段：
@@ -52,7 +61,8 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `on` | 触发事件（见上方事件表） | 必填 |
 | `when` | 对 `turn/end` 按结束原因过滤 | 全部原因 |
 | `match` | 字段 → 正则，全部匹配才触发；字段为上下文键（`tool`/`sessionName`/`sessionId`/`error`/`source`/`cwd`/`content`/`reason`…），上下文中不存在的字段视为不匹配 | 不过滤 |
-| `run` | 通过系统 shell 执行的命令 | 必填 |
+| `run` | 通过系统 shell 执行的命令（与 `notify` 二选一） | 二选一必填 |
+| `notify` | 内置通知（与 `run` 二选一）：`channel: webhook`（HTTP JSON，`url` 可省略用 `DSH_HOOKS_WEBHOOK_URL`，`slack: true` 换单行摘要）或 `channel: desktop`（系统气泡/toast） | 二选一必填 |
 | `input` | `env` 只传 `DSH_HOOK_*` 环境变量；`stdin` 额外把完整上下文 JSON 写入命令标准输入 | `env` |
 | `timeoutMs` | 单次执行超时（毫秒），超时终止进程树 | 10000 |
 | `retries` | 非零退出码的重试次数（spawn 失败与超时不重试） | 0 |

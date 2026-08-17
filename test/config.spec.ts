@@ -34,8 +34,10 @@ describe('Config schema', () => {
     expect(() => Config({ hooks: [{ on: 'tools/pre-execute', run: 'x' }] })).toThrow()
   })
 
-  it('rejects a hook without run', () => {
-    expect(() => Config({ hooks: [{ on: 'turn/start' }] })).toThrow()
+  it('accepts a hook without run (run/notify exclusivity is enforced at runtime)', () => {
+    const result = Config({ hooks: [{ on: 'turn/start' }] })
+    expect(result.hooks).toHaveLength(1)
+    expect(result.hooks?.[0]?.run).toBeUndefined()
   })
 
   it('accepts every known turn/end reason kind as when', () => {
@@ -97,5 +99,24 @@ describe('Config schema', () => {
   it('accepts retries and retryDelayMs', () => {
     const result = Config({ hooks: [{ on: 'turn/end', retries: 3, retryDelayMs: 1000, run: 'x' }] })
     expect(result.hooks?.[0]).toMatchObject({ retries: 3, retryDelayMs: 1000 })
+  })
+
+  it('accepts a built-in webhook notification', () => {
+    const result = Config({
+      hooks: [{ on: 'turn/end', notify: { channel: 'webhook', url: 'https://hooks.example/x' } }],
+    })
+    expect(result.hooks?.[0]?.notify).toMatchObject({ channel: 'webhook', url: 'https://hooks.example/x', slack: false })
+    expect(result.hooks?.[0]?.run).toBeUndefined()
+  })
+
+  it('accepts a desktop notification with defaults', () => {
+    const result = Config({ hooks: [{ on: 'approval/asked', notify: { channel: 'desktop' } }] })
+    expect(result.hooks?.[0]?.notify).toMatchObject({ channel: 'desktop', slack: false })
+  })
+
+  it('rejects unknown notify channels', () => {
+    expect(() =>
+      Config({ hooks: [{ on: 'turn/end', notify: { channel: 'telegram' as never } }] }),
+    ).toThrow()
   })
 })

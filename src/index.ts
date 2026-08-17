@@ -18,8 +18,9 @@ import {
   type AgentErrorPayload,
   type AgentStatusPayload,
 } from './events.js'
-import type { HookContext } from './context.js'
+import { eventLabel, type HookContext } from './context.js'
 import { createHookRunner } from './runner.js'
+import { fireNotify } from './notify.js'
 
 export const name = 'dsh-hooks'
 
@@ -37,7 +38,15 @@ export function apply(ctx: Context, config: Config = {}) {
     for (const hook of hooks) {
       if (!hookMatches(hook, ctxValue.event, reasonKind)) continue
       if (!matchFilters(hook.match, ctxValue)) continue
-      runner.run(hook, ctxValue)
+      if (hook.notify) {
+        void fireNotify(hook.notify, ctxValue)
+        continue
+      }
+      if (hook.run) {
+        runner.run(hook, ctxValue)
+        continue
+      }
+      console.warn(`[dsh-hooks] hook 既没有 run 也没有 notify，已跳过：${eventLabel(ctxValue)}`)
     }
   }
 
