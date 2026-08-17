@@ -38,8 +38,15 @@ Add a config block to your profile's `cordis.patch.yml`:
 | Event | When it fires | Useful context |
 | --- | --- | --- |
 | `turn/start` | A turn begins | session id, turn |
-| `turn/end` | A turn ends (`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`) | reason, turn, duration |
+| `turn/end` | A turn ends (`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`) | reason, turn, duration, content, turn token usage |
+| `step/end` | One step of a turn ends (one model call plus its tool executions) | turn, step |
+| `tool/call` | The model requests one tool invocation | tool name, call id, raw arguments JSON |
+| `tool/result` | A tool call completes | tool name (resolved), result text, failure identity |
+| `user/message` | A user-role message appears on the surface | source kind (`user` / `plugin` / …), message text |
 | `approval/asked` | A tool call requests user approval | tool name, call id, reason |
+| `session/title` | The session title updates (explicit rename / LLM title / fallback) | new title, source kind |
+| `session/created` | A session is published | session id, cwd |
+| `session/disposed` | A session leaves the registry | session id, cwd |
 | `agent/created` | An agent is published | session id |
 | `agent/disposed` | An agent leaves the registry | session id |
 | `agent/error` | The agent loop reports an error | error text |
@@ -57,17 +64,45 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_EVENT` | event type, e.g. `turn/end` |
 | `DSH_HOOK_SESSION_ID` | session id |
 | `DSH_HOOK_SESSION_NAME` | readable session title (latest `session/title` log event, or first human prompt) |
-| `DSH_HOOK_TURN` | turn number (turn events) |
+| `DSH_HOOK_CWD` | session working directory |
+| `DSH_HOOK_TURN` | turn number (turn / step / tool events) |
+| `DSH_HOOK_STEP` | step number (step / tool events) |
 | `DSH_HOOK_REASON` | turn end reason kind |
-| `DSH_HOOK_TOOL` | tool name (approval events) |
-| `DSH_HOOK_CALL_ID` | tool call id (approval events) |
+| `DSH_HOOK_TOOL` | tool name (approval / tool events) |
+| `DSH_HOOK_CALL_ID` | tool call id (approval / tool events) |
+| `DSH_HOOK_TOOL_ARGS` | raw tool arguments JSON (tool/call) |
+| `DSH_HOOK_TOOL_ERROR` | tool failure identity `name: code` (tool/result errors) |
+| `DSH_HOOK_SOURCE` | message / title source kind (`user`, `plugin`, `fallback`, `provider`, …) |
 | `DSH_HOOK_DURATION_MS` | turn duration ms (turn/end) |
 | `DSH_HOOK_STATUS` | agent status (`agent/status`) |
 | `DSH_HOOK_ERROR` | error text (`agent/error`, and the failure message on `turn/end` error) |
-| `DSH_HOOK_CONTENT` | the turn's final assistant text (turn events) |
+| `DSH_HOOK_CONTENT` | event content snapshot: turn assistant text, tool result text, user message text |
+| `DSH_HOOK_USAGE_INPUT_TOKENS` | aggregated input tokens of the turn (turn/end, summed across steps) |
+| `DSH_HOOK_USAGE_OUTPUT_TOKENS` | aggregated output tokens of the turn |
+| `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | aggregated cache-read tokens, when reported |
+| `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | aggregated cache-write tokens, when reported |
+| `DSH_HOOK_USAGE_REASONING_TOKENS` | aggregated reasoning tokens, when reported |
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.
+
+## Generic webhook example
+
+Besides Feishu, `examples/notify-webhook.mjs` posts the full hook context as one JSON document to any HTTP endpoint — Slack incoming webhooks, Discord, Lark/DingTalk custom bots, ntfy, Bark, n8n:
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    hooks:
+      - on: 'turn/end'
+        when: 'completed'
+        run: 'node examples/notify-webhook.mjs --url https://hooks.slack.com/services/…'
+      - on: 'tool/result'        # alert on tool failures
+        run: 'node examples/notify-webhook.mjs --slack'
+```
+
+The URL may also live in the dsh process environment as `DSH_HOOKS_WEBHOOK_URL` (never in config files). `--slack` swaps the payload for a one-line `{ text }` summary; `--timeout <ms>` sets the fetch timeout (default 10000, one automatic retry on transport failure).
 
 ## Feishu notification example
 

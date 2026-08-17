@@ -32,6 +32,56 @@ describe('toEnv', () => {
     expect('DSH_HOOK_SESSION_NAME' in env).toBe(false)
     expect('DSH_HOOK_CONTENT' in env).toBe(false)
   })
+
+  it('carries step, tool call, and source fields', () => {
+    const env = toEnv({
+      event: 'tool/call',
+      step: 3,
+      tool: 'pwsh',
+      callId: 'call-1',
+      toolArgs: '{"a":1}',
+      toolError: 'EACCES: x',
+      source: 'user',
+      timestamp: 'T',
+    })
+    expect(env.DSH_HOOK_STEP).toBe('3')
+    expect(env.DSH_HOOK_TOOL).toBe('pwsh')
+    expect(env.DSH_HOOK_CALL_ID).toBe('call-1')
+    expect(env.DSH_HOOK_TOOL_ARGS).toBe('{"a":1}')
+    expect(env.DSH_HOOK_TOOL_ERROR).toBe('EACCES: x')
+    expect(env.DSH_HOOK_SOURCE).toBe('user')
+  })
+
+  it('omits the tool/source fields when absent', () => {
+    const env = toEnv({ event: 'step/end', timestamp: 'T' })
+    expect('DSH_HOOK_STEP' in env).toBe(false)
+    expect('DSH_HOOK_TOOL_ARGS' in env).toBe(false)
+    expect('DSH_HOOK_TOOL_ERROR' in env).toBe(false)
+    expect('DSH_HOOK_SOURCE' in env).toBe(false)
+  })
+
+  it('carries aggregated usage fields', () => {
+    const env = toEnv({
+      event: 'turn/end',
+      usageInputTokens: 120,
+      usageOutputTokens: 60,
+      usageCacheReadTokens: 500,
+      usageCacheWriteTokens: 30,
+      usageReasoningTokens: 8,
+      timestamp: 'T',
+    })
+    expect(env.DSH_HOOK_USAGE_INPUT_TOKENS).toBe('120')
+    expect(env.DSH_HOOK_USAGE_OUTPUT_TOKENS).toBe('60')
+    expect(env.DSH_HOOK_USAGE_CACHE_READ_TOKENS).toBe('500')
+    expect(env.DSH_HOOK_USAGE_CACHE_WRITE_TOKENS).toBe('30')
+    expect(env.DSH_HOOK_USAGE_REASONING_TOKENS).toBe('8')
+  })
+
+  it('omits usage fields when absent', () => {
+    const env = toEnv({ event: 'turn/end', timestamp: 'T' })
+    expect('DSH_HOOK_USAGE_INPUT_TOKENS' in env).toBe(false)
+    expect('DSH_HOOK_USAGE_OUTPUT_TOKENS' in env).toBe(false)
+  })
 })
 
 describe('renderTemplate', () => {

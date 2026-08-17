@@ -4,7 +4,14 @@ import Schema from '@deepseek-ai/schemastery'
 export const HOOK_EVENTS = [
   'turn/start',
   'turn/end',
+  'step/end',
+  'tool/call',
+  'tool/result',
+  'user/message',
   'approval/asked',
+  'session/title',
+  'session/created',
+  'session/disposed',
   'agent/created',
   'agent/disposed',
   'agent/error',
@@ -55,7 +62,7 @@ export const Config: {
   hooks: Schema.array(
     Schema.object({
       on: Schema.union([...HOOK_EVENTS]).description(
-        '触发事件：turn/start | turn/end | approval/asked | agent/created | agent/disposed | agent/error | agent/status',
+        '触发事件：turn/start | turn/end | step/end | tool/call | tool/result | user/message | approval/asked | session/title | session/created | session/disposed | agent/created | agent/disposed | agent/error | agent/status',
       ),
       when: Schema.union([...TURN_END_REASONS]).description(
         '可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted）；其他事件忽略该字段',

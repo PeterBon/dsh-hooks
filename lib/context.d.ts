@@ -14,14 +14,28 @@ export interface HookContext {
     /** Absolute working directory of the session, when known. */
     cwd?: string;
     turn?: number;
+    /** Step number of the turn (step and tool events). */
+    step?: number;
     reason?: string;
     tool?: string;
     callId?: string;
+    /** Raw tool-call arguments JSON as the model produced it (tool/call). */
+    toolArgs?: string;
+    /** Tool failure identity (`name`/`code`) when a tool result errored. */
+    toolError?: string;
+    /** Producer source kind: user message source, title source, etc. */
+    source?: string;
     durationMs?: number;
     status?: string;
     error?: string;
-    /** Turn content snapshot, e.g. the turn's final assistant text. */
+    /** Event content snapshot: turn assistant text, tool result text, … */
     content?: string;
+    /** Aggregated token usage of the turn (turn/end), when reported. */
+    usageInputTokens?: number;
+    usageOutputTokens?: number;
+    usageCacheReadTokens?: number;
+    usageCacheWriteTokens?: number;
+    usageReasoningTokens?: number;
     timestamp: string;
 }
 export declare function toEnv(ctx: HookContext): Record<string, string>;
