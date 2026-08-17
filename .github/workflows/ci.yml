@@ -39,12 +39,17 @@ jobs:
 
       - run: pnpm run build
 
+      # The Web GUI panel package (workspace member) keeps its own check
+      # chain: typecheck + tests + tsdown build.
+      - run: pnpm --filter @PeterBon/dsh-hooks-ui run check
+
       # lib/ is committed for git-hosted installs (they never build). Fail
-      # when the committed copy drifts from a clean build.
+      # when the committed copy drifts from a clean build — both the core
+      # package at the repo root and the UI package under packages/.
       - name: Verify committed lib/ matches the build
         shell: bash
         run: |
-          if ! git diff --exit-code -- lib; then
+          if ! git diff --exit-code -- lib packages/dsh-hooks-ui/lib; then
             echo "::error::lib/ is out of sync — run 'pnpm run build' and commit the result"
             exit 1
           fi
