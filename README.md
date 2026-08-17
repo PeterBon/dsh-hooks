@@ -4,7 +4,7 @@ Config-driven lifecycle hooks plugin for [DeepSeek Harness](https://github.com/d
 
 Declare `event -> command` hooks directly in your profile's `cordis.patch.yml` — like Codex CLI / OpenCode hooks, but for dsh. No plugin code required.
 
-[中文文档](README.zh.md) | [Design](#design) | [Feishu example](examples/notify-feishu.mjs)
+[中文文档](README.zh.md) | [Design](#design) | [Feishu example](examples/notify-feishu.mjs) | [Web GUI 面板](packages/dsh-hooks-ui/README.md)
 
 ## Install
 
