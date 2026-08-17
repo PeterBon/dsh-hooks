@@ -28,6 +28,7 @@
   },
   "devDependencies": {
     "@deepseek-ai/dsh-client-runtime": "^0.1.0-rc.6",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.0-rc.6",
     "@deepseek-ai/dsh-client-ui-slots": "^0.1.0-rc.6",
     "@tsdown/css": "^0.22.14",
     "@types/node": "^26.2.0",

@@ -329,11 +329,11 @@ window.__ModuleLoader__.load({
 			applied = true;
 			injectCardStyle();
 			try {
-				ctx.slots.inject("web-ui.plugin.item", () => {
+				ctx.slots.inject("settings.plugins.tab", () => {
 					const unregister = ctx.slots.register({
-						name: "web-ui.plugin.item",
+						name: "settings.plugins.tab",
 						id: "dsh-hooks",
-						order: 120,
+						order: 100,
 						label: "Hooks"
 					}, HooksSettingsCard);
 					return () => {
