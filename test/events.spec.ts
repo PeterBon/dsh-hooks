@@ -8,11 +8,14 @@ import {
   classifySessionEvent,
   errorText,
   hookMatches,
+  sessionCreatedContext,
+  sessionDisposedContext,
   sessionTitle,
   statusText,
   turnContent,
   turnEndContext,
   turnStartContext,
+  turnUsage,
 } from '../src/events.js'
 
 // Minimal structural fakes for the session/event shapes this module consumes.
@@ -269,5 +272,146 @@ describe('context builders', () => {
   it('approvalContext is idempotent', () => {
     const ctx = approvalContext(fakeSession('s3'), { id: 'q1', toolName: 'ssh_exec' })
     expect(ctx).toMatchObject({ event: 'approval/asked', tool: 'ssh_exec' })
+  })
+})
+
+describe('turnUsage aggregation', () => {
+  it('sums input/output across steps and skips other turns', () => {
+    const withUsage = (seq: number, turn: number, usage: unknown) => ({
+      type: 'assistant/message',
+      seq,
+      time: 1,
+      data: {
+        turn,
+        step: seq,
+        message: { id: `a${seq}`, role: 'assistant', content: [textBlock('x')], source: { kind: 'model' } },
+        usage,
+      },
+    }) as never
+    const session = fakeSession('s1', [
+      withUsage(1, 1, { inputTokens: 100, outputTokens: 50 }),
+      withUsage(2, 1, { inputTokens: 30, outputTokens: 20, cacheReadTokens: 500, reasoningTokens: 7 }),
+      withUsage(3, 2, { inputTokens: 999, outputTokens: 999 }),
+    ])
+    expect(turnUsage(session, 1)).toEqual({
+      inputTokens: 130,
+      outputTokens: 70,
+      cacheReadTokens: 500,
+      reasoningTokens: 7,
+    })
+  })
+
+  it('returns undefined when no step reported usage', () => {
+    expect(turnUsage(fakeSession('s1', [assistantMessage(1, 1, '无统计')]), 1)).toBeUndefined()
+    expect(turnUsage(fakeSession('s1'), 1)).toBeUndefined()
+  })
+})
+
+describe('new firehose events', () => {
+  it('classifies step/end', () => {
+    const ctx = classifySessionEvent(fakeSession('s1'), sessionEvent('step/end', { turn: 2, step: 5 }))
+    expect(ctx).toMatchObject({ event: 'step/end', sessionId: 's1', turn: 2, step: 5 })
+  })
+
+  it('classifies tool/call with name and raw arguments', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('tool/call', { turn: 2, step: 1, callId: 'call-9', name: 'pwsh', arguments: '{"command":"rm -rf /"}' }),
+    )
+    expect(ctx).toMatchObject({
+      event: 'tool/call',
+      sessionId: 's1',
+      turn: 2,
+      step: 1,
+      tool: 'pwsh',
+      callId: 'call-9',
+      toolArgs: '{"command":"rm -rf /"}',
+    })
+  })
+
+  it('classifies tool/result and resolves the tool name from the matching call', () => {
+    const session = fakeSession('s1')
+    classifySessionEvent(
+      session,
+      sessionEvent('tool/call', { turn: 2, step: 1, callId: 'call-9', name: 'read', arguments: '{}' }),
+    )
+    const ctx = classifySessionEvent(
+      session,
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        callId: 'call-9',
+        message: { id: 'm1', role: 'user', content: [{ type: 'tool-result', toolCallId: 'call-9', content: [textBlock('文件内容')] }], source: { kind: 'tool', callId: 'call-9' } },
+      }),
+    )
+    expect(ctx).toMatchObject({ event: 'tool/result', tool: 'read', callId: 'call-9', content: '文件内容', toolError: undefined })
+  })
+
+  it('classifies tool/result with a failure identity', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        callId: 'call-10',
+        message: { id: 'm2', role: 'user', content: [{ type: 'tool-result', toolCallId: 'call-10', content: [] }], source: { kind: 'tool', callId: 'call-10' } },
+        error: { name: 'EACCES', code: 'permission-denied' },
+      }),
+    )
+    expect(ctx).toMatchObject({ event: 'tool/result', tool: undefined, toolError: 'EACCES: permission-denied' })
+  })
+
+  it('classifies user/message with source and content', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('user/message', { id: 'u1', role: 'user', content: [textBlock('新的需求')], source: { kind: 'user' } }),
+    )
+    expect(ctx).toMatchObject({ event: 'user/message', source: 'user', content: '新的需求' })
+  })
+
+  it('classifies session/title with the new name and source kind', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('session/title', { title: '新的会话名', messageSeqs: [1], source: { kind: 'provider', provider: 'x' } }),
+    )
+    expect(ctx).toMatchObject({ event: 'session/title', sessionName: '新的会话名', source: 'provider' })
+  })
+
+  it('session lifecycle contexts carry id, name, and cwd', () => {
+    const session = fakeSession('s9', [userMessage(1, '开局第一问')])
+    expect(sessionCreatedContext(session)).toMatchObject({
+      event: 'session/created',
+      sessionId: 's9',
+      sessionName: '开局第一问',
+      cwd: 'D:\\work\\demo',
+    })
+    expect(sessionDisposedContext(session)).toMatchObject({ event: 'session/disposed', sessionId: 's9' })
+  })
+})
+
+describe('turnEndContext usage enrichment', () => {
+  it('attaches aggregated usage to turn/end contexts', () => {
+    const withUsage = (seq: number, usage: unknown) => ({
+      type: 'assistant/message',
+      seq,
+      time: 1,
+      data: {
+        turn: 1,
+        step: seq,
+        message: { id: `a${seq}`, role: 'assistant', content: [textBlock('x')], source: { kind: 'model' } },
+        usage,
+      },
+    }) as never
+    const session = fakeSession('s1', [withUsage(1, { inputTokens: 10, outputTokens: 5 })])
+    const ctx = turnEndContext(session, 1, 'completed')
+    expect(ctx.usageInputTokens).toBe(10)
+    expect(ctx.usageOutputTokens).toBe(5)
+    expect(ctx.usageCacheReadTokens).toBeUndefined()
+  })
+
+  it('leaves usage fields undefined when the turn has none', () => {
+    const ctx = turnEndContext(fakeSession('s1'), 1, 'completed')
+    expect(ctx.usageInputTokens).toBeUndefined()
+    expect(ctx.usageOutputTokens).toBeUndefined()
   })
 })

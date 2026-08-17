@@ -9,9 +9,23 @@ export interface ApprovalAskedData {
     callId?: string;
     reason?: string;
 }
+/** `session/title` payload (merge-extensible, declared by dsh-session-title). */
+export interface SessionTitleEventData {
+    title: string;
+    messageSeqs: number[];
+    source: {
+        kind: 'fallback';
+    } | {
+        kind: 'provider';
+        provider?: unknown;
+    } | {
+        kind: 'user';
+    };
+}
 declare module '@deepseek-ai/dsh-session/types' {
     interface SessionEventMap {
         'approval/asked': ApprovalAskedData;
+        'session/title': SessionTitleEventData;
     }
 }
 /** Agent lifecycle payloads (structural; emitted by dsh-agent's AgentService). */
@@ -45,12 +59,44 @@ export declare function sessionTitle(session: Session): string | undefined;
  * their own display truncation.
  */
 export declare function turnContent(session: Session, turn: number): string | undefined;
+/** Aggregated turn usage for hook contexts (only fields actually reported). */
+export interface UsageTotals {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
+}
+/**
+ * Sum the `usage` of every `assistant/message` of a turn. Steps without
+ * reported accounting are skipped; returns undefined when no step reported
+ * any usage (adapters may omit it entirely).
+ */
+export declare function turnUsage(session: Session, turn: number): UsageTotals | undefined;
 export declare function rememberTurnStart(session: Session): void;
 export declare function clearTurnTracking(session: Session): void;
 /** Does a declared hook match this event (type + optional `when` filter)? */
 export declare function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndReasonKind): boolean;
 export declare function turnEndContext(session: Session, turn: number, reason: TurnEndReason | string): HookContext;
 export declare function turnStartContext(session: Session, turn: number): HookContext;
+export declare function stepEndContext(session: Session, turn: number, step: number): HookContext;
+export declare function toolCallContext(session: Session, turn: number, step: number, callId: unknown, name: unknown, args: unknown): HookContext;
+export declare function toolResultContext(session: Session, turn: number, step: number, callId: unknown, message: {
+    content?: readonly {
+        type?: unknown;
+        text?: unknown;
+    }[];
+}, error: {
+    name?: unknown;
+    code?: unknown;
+} | undefined): HookContext;
+export declare function userMessageContext(session: Session, content: readonly {
+    type?: unknown;
+    text?: unknown;
+}[], source: unknown): HookContext;
+export declare function titleContext(session: Session, title: unknown, source: unknown): HookContext;
+export declare function sessionCreatedContext(session: Session): HookContext;
+export declare function sessionDisposedContext(session: Session): HookContext;
 export declare function approvalContext(session: Session, data: ApprovalAskedData): HookContext;
 export declare function agentCreatedContext(agent: AgentLike): HookContext;
 export declare function agentDisposedContext(agent: AgentLike): HookContext;

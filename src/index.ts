@@ -10,6 +10,8 @@ import {
   classifySessionEvent,
   clearTurnTracking,
   hookMatches,
+  sessionCreatedContext,
+  sessionDisposedContext,
   type AgentCreatedPayload,
   type AgentDisposedPayload,
   type AgentErrorPayload,
@@ -37,12 +39,21 @@ export function apply(ctx: Context, config: Config = {}) {
     }
   }
 
-  // Durable session firehose: turn boundaries and approval requests.
+  // Durable session firehose: turn boundaries, steps, tool calls, messages,
+  // titles, and approval requests.
   ctx.on('session/event', (session: Session, event: unknown) => {
     const classified = classifySessionEvent(session, event as never)
     if (classified === undefined) return
     const reasonKind = extractReasonKind(event)
     runMatching(classified, reasonKind)
+  })
+
+  // Session lifecycle (published by the session store, not the firehose).
+  ctx.on('session/created', (session: Session) => {
+    runMatching(sessionCreatedContext(session))
+  })
+  ctx.on('session/disposed', (session: Session) => {
+    runMatching(sessionDisposedContext(session))
   })
 
   // Agent lifecycle events.

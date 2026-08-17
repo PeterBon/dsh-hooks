@@ -38,8 +38,15 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | 事件 | 触发时机 | 有用上下文 |
 | --- | --- | --- |
 | `turn/start` | 回合开始 | 会话 id、回合号 |
-| `turn/end` | 回合结束（`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`） | reason、回合号、耗时 |
+| `turn/end` | 回合结束（`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`） | reason、回合号、耗时、内容、本回合 token 用量 |
+| `step/end` | 回合内一步结束（一次模型调用 + 其工具执行） | 回合号、步号 |
+| `tool/call` | 模型请求一次工具调用 | 工具名、调用 id、原始参数 JSON |
+| `tool/result` | 工具调用完成 | 工具名（自动反查）、结果文本、失败标识 |
+| `user/message` | 会话表面出现用户角色消息 | 来源 kind（`user` / `plugin` / …）、消息文本 |
 | `approval/asked` | 工具调用请求用户审批 | 工具名、调用 id、原因 |
+| `session/title` | 会话标题更新（显式改名 / LLM 生成 / 回退） | 新标题、来源 kind |
+| `session/created` | 会话发布 | 会话 id、cwd |
+| `session/disposed` | 会话离开注册表 | 会话 id、cwd |
 | `agent/created` | Agent 发布 | 会话 id |
 | `agent/disposed` | Agent 离开注册表 | 会话 id |
 | `agent/error` | Agent 循环报错 | 错误文本 |
@@ -57,17 +64,45 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_EVENT` | 事件类型，如 `turn/end` |
 | `DSH_HOOK_SESSION_ID` | 会话 id |
 | `DSH_HOOK_SESSION_NAME` | 会话可读标题（最新 `session/title` 日志事件，或首个用户消息回退） |
-| `DSH_HOOK_TURN` | 回合号（回合事件） |
+| `DSH_HOOK_CWD` | 会话工作目录 |
+| `DSH_HOOK_TURN` | 回合号（回合 / 步骤 / 工具事件） |
+| `DSH_HOOK_STEP` | 步号（步骤 / 工具事件） |
 | `DSH_HOOK_REASON` | 回合结束原因 |
-| `DSH_HOOK_TOOL` | 工具名（审批事件） |
-| `DSH_HOOK_CALL_ID` | 工具调用 id（审批事件） |
+| `DSH_HOOK_TOOL` | 工具名（审批 / 工具事件） |
+| `DSH_HOOK_CALL_ID` | 工具调用 id（审批 / 工具事件） |
+| `DSH_HOOK_TOOL_ARGS` | 工具原始参数 JSON（tool/call） |
+| `DSH_HOOK_TOOL_ERROR` | 工具失败标识 `名称: 代码`（tool/result 出错时） |
+| `DSH_HOOK_SOURCE` | 消息 / 标题来源 kind（`user`、`plugin`、`fallback`、`provider`…） |
 | `DSH_HOOK_DURATION_MS` | 回合耗时毫秒（turn/end） |
 | `DSH_HOOK_STATUS` | Agent 状态（agent/status） |
 | `DSH_HOOK_ERROR` | 错误文本（agent/error，以及 turn/end 出错时的失败详情） |
-| `DSH_HOOK_CONTENT` | 该回合最后一段助手回复文本（回合事件） |
+| `DSH_HOOK_CONTENT` | 事件内容快照：回合最后助手文本、工具结果文本、用户消息文本 |
+| `DSH_HOOK_USAGE_INPUT_TOKENS` | 本回合输入 token 总量（turn/end，逐 step 聚合） |
+| `DSH_HOOK_USAGE_OUTPUT_TOKENS` | 本回合输出 token 总量 |
+| `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | 本回合缓存读 token（有上报时） |
+| `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | 本回合缓存写 token（有上报时） |
+| `DSH_HOOK_USAGE_REASONING_TOKENS` | 本回合思考 token（有上报时） |
 | `DSH_HOOK_TIMESTAMP` | ISO 时间戳 |
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。
+
+## 通用 webhook 示例
+
+除了飞书，`examples/notify-webhook.mjs` 把完整 hook 上下文作为一份 JSON POST 到任意 HTTP 端点——Slack 入站 webhook、Discord、企业微信/钉钉自定义机器人、ntfy、Bark、n8n 都能接：
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    hooks:
+      - on: 'turn/end'
+        when: 'completed'
+        run: 'node examples/notify-webhook.mjs --url https://hooks.slack.com/services/…'
+      - on: 'tool/result'        # 工具连续失败时告警
+        run: 'node examples/notify-webhook.mjs --slack'
+```
+
+URL 也可放在 dsh 进程环境的 `DSH_HOOKS_WEBHOOK_URL`（不要写进配置文件）。`--slack` 把 payload 换成一行摘要的 `{ text }` 格式；`--timeout <ms>` 控制超时（默认 10000，传输失败自动重试一次）。
 
 ## 飞书通知示例
 

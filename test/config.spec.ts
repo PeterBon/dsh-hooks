@@ -55,6 +55,19 @@ describe('Config schema', () => {
     expect(HOOK_EVENTS).toContain('agent/error')
   })
 
+  it('declares the firehose extension events', () => {
+    for (const event of ['step/end', 'tool/call', 'tool/result', 'user/message', 'session/title', 'session/created', 'session/disposed']) {
+      expect(HOOK_EVENTS).toContain(event)
+    }
+  })
+
+  it('accepts a hook on every firehose extension event', () => {
+    for (const event of ['step/end', 'tool/call', 'tool/result', 'user/message', 'session/title', 'session/created', 'session/disposed']) {
+      const result = Config({ hooks: [{ on: event, run: 'x' }] })
+      expect(result.hooks?.[0]?.on).toBe(event)
+    }
+  })
+
   it('declares all turn/end reason kinds', () => {
     for (const kind of ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted']) {
       expect(TURN_END_REASONS).toContain(kind)
