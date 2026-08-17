@@ -1,5 +1,10 @@
+# Workspace layout: the dsh-hooks core package stays at the repository root
+# (git installs like `github:PeterBon/dsh-hooks` resolve the root
+# package.json), while optional add-on packages — the Web GUI panel — live
+# under packages/.
 packages:
-  - .
+  - '.'
+  - 'packages/*'
 
 allowBuilds:
   esbuild: true

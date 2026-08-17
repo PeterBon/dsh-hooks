@@ -154,6 +154,18 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # 端到端真跑匹配�
 
 `dry-run` 直接读 profile 的 `cordis.patch.yml`（`id: dsh-hooks` 配置块），配置校验（非法正则等）会在这一步报错。
 
+## Web profile HTTP 路由
+
+web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 loopback-only 的 `/dsh-hooks/*` 路由——CLI/headless 环境完全无感：
+
+| 路由 | 方法 | 用途 |
+| --- | --- | --- |
+| `/dsh-hooks/status` | GET | 插件版本、hook 数、历史条数 |
+| `/dsh-hooks/history?n=50` | GET | 最近 N 条执行历史（JSON envelope） |
+| `/dsh-hooks/test` | POST | 模拟事件评估：`{"event":"tool/call","tool":"ssh_exec","execute":false}` 返回逐 hook 匹配报告；`execute: true` 真跑匹配的 hook |
+
+安全约定与 dsh-aionui-panel 一致：仅回环地址可达、POST 必须 `application/json`（防跨站表单 CSRF）。同时 web profile 下会向 agent 注入一段 systemPrompt 公告，说明插件存在与协作方式。
+
 ## 通用 webhook 示例
 
 除了飞书，`examples/notify-webhook.mjs` 把完整 hook 上下文作为一份 JSON POST 到任意 HTTP 端点——Slack 入站 webhook、Discord、企业微信/钉钉自定义机器人、ntfy、Bark、n8n 都能接：

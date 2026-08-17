@@ -172,6 +172,18 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually r
 
 `dry-run` reads the profile's `cordis.patch.yml` (the `id: dsh-hooks` block) and validates the config (bad regexes fail here).
 
+## Web profile HTTP routes
+
+In the web profile (when the shared webServer service exists) dsh-hooks registers loopback-only `/dsh-hooks/*` routes — CLI/headless environments never see them:
+
+| Route | Method | Purpose |
+| --- | --- | --- |
+| `/dsh-hooks/status` | GET | plugin version, hook count, history count |
+| `/dsh-hooks/history?n=50` | GET | the latest N execution records (JSON envelope) |
+| `/dsh-hooks/test` | POST | simulate an event: `{"event":"tool/call","tool":"ssh_exec","execute":false}` returns a per-hook match report; `execute: true` actually runs the matching hooks |
+
+Security matches dsh-aionui-panel: loopback-only, POSTs require `application/json` (blocks cross-site form CSRF). The web profile also gets a systemPrompt section announcing the plugin to agents.
+
 ## Feishu notification example
 
 The fastest path is the one-shot setup CLI — it creates the Feishu app for you via a QR-code scan and writes all hook config:
