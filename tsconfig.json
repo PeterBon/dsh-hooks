@@ -18,5 +18,5 @@
     "resolveJsonModule": true
   },
   "include": ["src"],
-  "exclude": ["node_modules", "lib", "test"]
+  "exclude": ["node_modules", "lib", "test", "src/client"]
 }

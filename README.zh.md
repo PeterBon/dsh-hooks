@@ -8,13 +8,15 @@
 
 ## 安装
 
+一个包搞定全部（hook 引擎 + Web GUI 设置页）：
+
 ```sh
 dsh plugin --profile web add dsh-hooks           # 从 npm 安装
 # 或直接从 git 安装：
 dsh plugin --profile web add github:PeterBon/dsh-hooks
 ```
 
-重启 `dsh web` 生效。
+重启 `dsh web` 生效。安装后设置面板里会出现「Hooks」分区（见 [Web GUI](#web-gui)）。
 
 ## 配置
 
@@ -153,6 +155,16 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # 端到端真跑匹配�
 ```
 
 `dry-run` 直接读 profile 的 `cordis.patch.yml`（`id: dsh-hooks` 配置块），配置校验（非法正则等）会在这一步报错。
+
+## Web GUI
+
+安装后，dsh web 的设置面板里会出现「Hooks」分区（与「通用」「插件」平级）：
+
+- **状态徽章**：插件版本、hook 数、历史条数
+- **执行历史时间线**：最近 30 条触发（时间 / 事件 / 命令 / 结果 / stderr 尾部），5 秒自动刷新
+- **手动测试**：选事件（14 类）+ reason/tool，「模拟」看逐 hook 匹配报告，「执行」真实触发
+
+CLI/headless 环境完全不受影响：浏览器半只在 web 加载，核心零 UI 运行时依赖。
 
 ## Web profile HTTP 路由
 

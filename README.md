@@ -4,9 +4,11 @@ Config-driven lifecycle hooks plugin for [DeepSeek Harness](https://github.com/d
 
 Declare `event -> command` hooks directly in your profile's `cordis.patch.yml` — like Codex CLI / OpenCode hooks, but for dsh. No plugin code required.
 
-[中文文档](README.zh.md) | [Design](#design) | [Feishu example](examples/notify-feishu.mjs) | [Web GUI 面板](packages/dsh-hooks-ui/README.md)
+[中文文档](README.zh.md) | [Design](#design) | [Feishu example](examples/notify-feishu.mjs) | [Web GUI](#web-gui)
 
 ## Install
+
+One package ships everything (hook engine + Web GUI settings page):
 
 ```sh
 dsh plugin --profile web add dsh-hooks           # from npm
@@ -14,7 +16,7 @@ dsh plugin --profile web add dsh-hooks           # from npm
 dsh plugin --profile web add github:PeterBon/dsh-hooks
 ```
 
-Restart `dsh web`.
+Restart `dsh web`. The settings panel gains a "Hooks" section (see [Web GUI](#web-gui)).
 
 ## Configure
 
@@ -171,6 +173,16 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually r
 ```
 
 `dry-run` reads the profile's `cordis.patch.yml` (the `id: dsh-hooks` block) and validates the config (bad regexes fail here).
+
+## Web GUI
+
+After install, the dsh web settings panel gains a "Hooks" section (beside General and Plugins):
+
+- **Status badges**: plugin version, hook count, history count
+- **Execution-history timeline**: the latest 30 triggers (time / event / command / outcome / stderr tail), refreshed every 5s
+- **Manual tester**: pick an event (14 kinds) + reason/tool; "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks
+
+CLI/headless environments are unaffected: the browser half loads only in the web GUI and the core has no UI runtime dependencies.
 
 ## Web profile HTTP routes
 
