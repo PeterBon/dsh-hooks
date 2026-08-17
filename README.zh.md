@@ -9,9 +9,13 @@
 ## 安装
 
 ```sh
-dsh plugin --profile web add dsh-hooks           # 从 npm 安装
+dsh plugin --profile web add dsh-hooks           # 核心：hook 引擎、执行历史、dry-run
 # 或直接从 git 安装：
 dsh plugin --profile web add github:PeterBon/dsh-hooks
+
+# 可选 Web GUI：设置里多一个「Hooks」分区（历史时间线 + 手动测试器）。
+# 单独安装——核心不带 UI 也能独立工作。
+dsh plugin --profile web add dsh-hooks-ui
 ```
 
 重启 `dsh web` 生效。
