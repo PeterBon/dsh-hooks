@@ -57,6 +57,7 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
   const pendingRetries = new Set<ReturnType<typeof setTimeout>>()
 
   function spawnOnce(spec: HookSpec, ctx: HookContext, attempt: number): RunOutcome {
+    if (!spec.run) return { ok: false, reason: 'skipped', detail: 'no run command' }
     const timeoutMs = spec.timeoutMs ?? DEFAULT_TIMEOUT_MS
     const retries = spec.retries ?? 0
     const retryDelayMs = spec.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS
@@ -135,6 +136,7 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
   }
 
   function run(spec: HookSpec, ctx: HookContext): RunOutcome {
+    if (!spec.run) return { ok: false, reason: 'skipped', detail: 'no run command' }
     return spawnOnce(spec, ctx, 0)
   }
 
