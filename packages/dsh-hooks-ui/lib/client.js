@@ -318,6 +318,8 @@ window.__ModuleLoader__.load({
 		//#endregion
 		//#region src/client/index.ts
 		const name = "@PeterBon/dsh-hooks-ui";
+		/** Required services: the slot registry must be up before this plugin applies. */
+		const inject = ["slots"];
 		const STYLE_ID = "dsh-hooks-ui-style";
 		/** Single-application guard: first apply wins; later calls become no-ops. */
 		let applied = false;
@@ -327,11 +329,11 @@ window.__ModuleLoader__.load({
 			applied = true;
 			injectCardStyle();
 			try {
-				ctx.slots.inject("web-ui.plugin.item", () => {
+				ctx.slots.inject("settings.plugins.tab", () => {
 					const unregister = ctx.slots.register({
-						name: "web-ui.plugin.item",
+						name: "settings.plugins.tab",
 						id: "dsh-hooks",
-						order: 120,
+						order: 100,
 						label: "Hooks"
 					}, HooksSettingsCard);
 					return () => {
@@ -356,6 +358,7 @@ window.__ModuleLoader__.load({
 		}
 		//#endregion
 		exports.apply = apply;
+		exports.inject = inject;
 		exports.name = name;
 		return module.exports;
 	}

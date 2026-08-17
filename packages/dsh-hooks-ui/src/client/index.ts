@@ -1,38 +1,25 @@
 /**
- * @PeterBon/dsh-hooks-ui — browser half: a settings card registered into the
- * shell's `web-ui.plugin.item` slot (official slot API, no DOM hacks). The
- * card shows the core plugin's status, the execution-history timeline, and a
- * manual event tester, all served by the core's /dsh-hooks/* routes.
+ * @PeterBon/dsh-hooks-ui — browser half: a plugin page registered into the
+ * official Plugins settings section (`settings.plugins.tab` slot, declared by
+ * the settings domain). The page shows the core plugin's status, the
+ * execution-history timeline, and a manual event tester, all served by the
+ * core's /dsh-hooks/* routes.
  *
  * Failure policy matches the task-board precedent: registration problems are
  * logged, never thrown — a plugin apply that throws fails the whole web
  * shell boot.
  */
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import type {} from '@deepseek-ai/dsh-client-ui-slots'
+import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { HooksSettingsCard } from './settings-card.tsx'
 import cardCss from './settings-card.module.css?inline'
 
 export const name = '@PeterBon/dsh-hooks-ui'
 
+/** Required services: the slot registry must be up before this plugin applies. */
+export const inject = ['slots'] as const
+
 const STYLE_ID = 'dsh-hooks-ui-style'
-
-declare module '@deepseek-ai/dsh-client-ui-slots' {
-  interface SlotMap {
-    /**
-     * The child slot the Web UI plugin group declares; this card registers
-     * into the group. Spelled with the same shape as the task-board plugin so
-     * this package can register without depending on the sibling UI package.
-     */
-    'web-ui.plugin.item': { kind: 'list'; scope: 'root'; owner: SettingsPluginItemOwnerProps }
-  }
-}
-
-/** Owner share of a plugin card (the section supplies nothing). */
-export interface SettingsPluginItemOwnerProps {
-  /** Marker field: card owner props are intentionally empty. */
-  children?: never
-}
 
 /** Single-application guard: first apply wins; later calls become no-ops. */
 let applied = false
@@ -45,12 +32,12 @@ export function apply(ctx: ClientContext): void {
   injectCardStyle()
 
   try {
-    ctx.slots.inject('web-ui.plugin.item', () => {
+    ctx.slots.inject('settings.plugins.tab', () => {
       const unregister = ctx.slots.register(
         {
-          name: 'web-ui.plugin.item',
+          name: 'settings.plugins.tab',
           id: 'dsh-hooks',
-          order: 120,
+          order: 100,
           label: 'Hooks',
         },
         HooksSettingsCard,
