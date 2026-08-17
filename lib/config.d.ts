@@ -56,8 +56,18 @@ export interface HookSpec {
     /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
     retryDelayMs?: number;
 }
+/** Execution-history settings: in-memory ring buffer + optional JSONL log. */
+export interface HistoryConfig {
+    /** Persist records to disk. Defaults to true. */
+    enabled?: boolean;
+    /** JSONL file path. Defaults to ~/.dsh/dsh-hooks/history.jsonl (0600). */
+    path?: string;
+    /** In-memory ring buffer size. Defaults to 500. */
+    max?: number;
+}
 export interface Config {
     hooks?: HookSpec[];
+    history?: HistoryConfig | null;
 }
 export declare const Config: {
     (data?: Config | null): Config;

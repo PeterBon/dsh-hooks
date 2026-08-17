@@ -119,4 +119,11 @@ describe('Config schema', () => {
       Config({ hooks: [{ on: 'turn/end', notify: { channel: 'telegram' as never } }] }),
     ).toThrow()
   })
+
+  it('accepts history settings with defaults', () => {
+    const result = Config({ history: { enabled: true, max: 100 } })
+    expect(result.history).toMatchObject({ enabled: true, max: 100 })
+    expect(Config({}).history).toBeUndefined()
+    expect(Config({ history: {} }).history).toMatchObject({ enabled: true, max: 500 })
+  })
 })

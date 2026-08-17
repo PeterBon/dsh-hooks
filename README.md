@@ -139,6 +139,39 @@ Besides Feishu, `examples/notify-webhook.mjs` posts the full hook context as one
 
 The URL may also live in the dsh process environment as `DSH_HOOKS_WEBHOOK_URL` (never in config files). `--slack` swaps the payload for a one-line `{ text }` summary; `--timeout <ms>` sets the fetch timeout (default 10000, one automatic retry on transport failure).
 
+## Execution history
+
+Every hook trigger is recorded into an in-memory ring buffer (default 500 entries) and best-effort appended to `~/.dsh/dsh-hooks/history.jsonl` (0600) — for future UIs and debugging. Records never contain secrets (env vars never enter records):
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    history:
+      enabled: true        # optional: persist to disk (default true)
+      max: 500             # optional: in-memory ring buffer size
+      # path: '…'          # optional: custom JSONL path (default ~/.dsh/dsh-hooks/history.jsonl)
+    hooks: […]
+```
+
+Each record: timestamp, kind (run/notify), event, command, session, outcome (spawned / exit-0 / exit-nonzero / timeout / sent / send-failed, …), exit code, duration, stderr tail. Disk failures are swallowed silently — history never blocks a hook.
+
+## dry-run: verify config
+
+Simulate an event to see which hooks would fire and why the others are filtered:
+
+```sh
+dsh-hooks dry-run turn/end --reason completed --profile web
+# ✅ [1] [turn/end when=completed] run: node notify-feishu.mjs
+# ⏭ [2] [turn/end when=error] run: … —— when 不匹配（期望 error，实际 completed）
+# ⏭ [3] [tool/call] run: … —— 事件不匹配（tool/call ≠ turn/end）
+# 共 1 个 hook 会触发。加 --execute 实际执行（真实副作用！）
+
+dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually run the matching hooks
+```
+
+`dry-run` reads the profile's `cordis.patch.yml` (the `id: dsh-hooks` block) and validates the config (bad regexes fail here).
+
 ## Feishu notification example
 
 The fastest path is the one-shot setup CLI — it creates the Feishu app for you via a QR-code scan and writes all hook config:

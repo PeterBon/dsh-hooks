@@ -21,6 +21,7 @@ import {
 import { eventLabel, type HookContext } from './context.js'
 import { createHookRunner } from './runner.js'
 import { fireNotify } from './notify.js'
+import { createHistorySink, type HistorySink } from './history.js'
 
 export const name = 'dsh-hooks'
 
@@ -29,17 +30,20 @@ export const name = 'dsh-hooks'
 export const inject = ['sessions'] as const
 
 export { Config }
+export { hookMatches, matchFilters } from './events.js'
+export { createHistorySink } from './history.js'
 
 export function apply(ctx: Context, config: Config = {}) {
   const hooks: readonly HookSpec[] = config.hooks ?? []
-  const runner = createHookRunner((line) => ctx.logger?.info(line))
+  const history: HistorySink = createHistorySink(config.history ?? undefined)
+  const runner = createHookRunner((line) => ctx.logger?.info(line), (record) => history.record(record))
 
   const runMatching = (ctxValue: HookContext, reasonKind?: TurnEndReasonKind): void => {
     for (const hook of hooks) {
       if (!hookMatches(hook, ctxValue.event, reasonKind)) continue
       if (!matchFilters(hook.match, ctxValue)) continue
       if (hook.notify) {
-        void fireNotify(hook.notify, ctxValue)
+        void fireNotify(hook.notify, ctxValue, (record) => history.record(record))
         continue
       }
       if (hook.run) {

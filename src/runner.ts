@@ -2,6 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import type { HookContext } from './context.js'
 import { eventLabel, renderTemplate, toEnv } from './context.js'
 import type { HookSpec } from './config.js'
+import type { HookRunRecord } from './history.js'
 
 export interface RunOutcome {
   ok: boolean
@@ -14,6 +15,8 @@ export interface HookRunner {
   run(spec: HookSpec, ctx: HookContext): RunOutcome
   dispose(): void
 }
+
+export type RunRecord = (record: Omit<HookRunRecord, 'ts'>) => void
 
 export const DEFAULT_TIMEOUT_MS = 10000
 export const DEFAULT_RETRY_DELAY_MS = 500
@@ -52,7 +55,7 @@ export function terminate(child: ChildProcess): void {
  * context as one JSON document to stdin, and `retries` re-spawns commands
  * whose exit code is non-zero (with exponential backoff, in the background).
  */
-export function createHookRunner(log: (line: string) => void = console.log): HookRunner {
+export function createHookRunner(log: (line: string) => void = console.log, record?: RunRecord): HookRunner {
   const children = new Set<ReturnType<typeof spawn>>()
   const pendingRetries = new Set<ReturnType<typeof setTimeout>>()
 
@@ -64,6 +67,13 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
     const env = toEnv(ctx)
     const command = renderTemplate(spec.run, ctx)
     const useStdin = spec.input === 'stdin'
+    const base = {
+      kind: 'run' as const,
+      event: ctx.event,
+      command,
+      sessionId: ctx.sessionId,
+      sessionName: ctx.sessionName,
+    }
 
     log(`[dsh-hooks] 触发 ${eventLabel(ctx)} → ${command}`)
 
@@ -77,15 +87,19 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
       console.warn(`[dsh-hooks] spawn 失败 (${eventLabel(ctx)}): ${detail}`)
+      record?.({ ...base, outcome: 'spawn-failed', error: detail })
       return { ok: false, reason: 'spawn-failed', detail }
     }
 
+    const startedAt = Date.now()
+    record?.({ ...base, outcome: 'spawned' })
     children.add(child)
     let timedOut = false
     const timer = setTimeout(() => {
       timedOut = true
       terminate(child)
       console.warn(`[dsh-hooks] 超时（${timeoutMs}ms），已终止：${eventLabel(ctx)}`)
+      record?.({ ...base, outcome: 'timeout', durationMs: Date.now() - startedAt })
     }, timeoutMs)
     // Never hold the process open for a hook.
     child.unref()
@@ -115,7 +129,12 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
       children.delete(child)
       // Timeouts and external kills (dispose) never retry; only a command
       // that actually ran and exited non-zero does.
-      if (timedOut || code === null || code === 0) return
+      if (timedOut || code === null || code === 0) {
+        if (!timedOut && code !== null) {
+          record?.({ ...base, outcome: 'exit-0', exitCode: 0, durationMs: Date.now() - startedAt })
+        }
+        return
+      }
       if (attempt < retries) {
         const delay = retryDelayMs * 2 ** attempt
         log(`[dsh-hooks] hook 退出码 ${code}，${delay}ms 后重试（${attempt + 1}/${retries}）：${eventLabel(ctx)}`)
@@ -130,6 +149,7 @@ export function createHookRunner(log: (line: string) => void = console.log): Hoo
       const tail = captured.err.trim()
       const detail = tail === '' ? '' : `，stderr：${tail.slice(-400)}`
       console.warn(`[dsh-hooks] hook 退出码 ${code} (${eventLabel(ctx)})${detail}`)
+      record?.({ ...base, outcome: 'exit-nonzero', exitCode: code, durationMs: Date.now() - startedAt, error: tail.slice(-400) || undefined })
     })
 
     return { ok: true, reason: 'ran' }
