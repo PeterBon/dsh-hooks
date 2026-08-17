@@ -9,10 +9,7 @@
       "types": "./lib/index.d.ts",
       "default": "./lib/index.js"
     },
-    "./client": {
-      "types": "./lib/client.d.ts",
-      "default": "./lib/client.js"
-    },
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "dsh": {
@@ -55,7 +52,7 @@
     "directory": "packages/dsh-hooks-ui"
   },
   "scripts": {
-    "build": "tsdown",
+    "build": "node -e \"require('fs').rmSync('lib', { recursive: true, force: true })\" && tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "pnpm run typecheck && pnpm run test && pnpm run build"

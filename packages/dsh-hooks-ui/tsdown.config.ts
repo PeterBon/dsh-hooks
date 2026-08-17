@@ -1,17 +1,46 @@
 import { defineConfig } from 'tsdown'
 
-export default defineConfig({
-  entry: ['src/index.ts', 'src/client.ts'],
+const id = '@PeterBon/dsh-hooks-ui'
+
+/**
+ * Two build faces (dsh-web-ui shared-preset pattern):
+ * - the node half: lib/index.js (minimal no-op host plugin)
+ * - the browser half: lib/client.js as a closure-factory artifact for the
+ *   GUI's __ModuleLoader__ — the bundle registers itself via
+ *   window.__ModuleLoader__.load({ id, factory }) and resolves externals
+ *   (react & co) through the injected require, backed by the shell's frozen
+ *   platform module table.
+ */
+const lib = {
+  name: id,
+  entry: ['src/index.ts'],
   outDir: 'lib',
-  format: ['esm'],
-  // Note: dts bundling inlines dependency declarations (including volatile
-  // pnpm-store path comments). The CI lib-sync check therefore compares only
-  // the .js artifacts of this package.
+  format: ['esm'] as const,
+  platform: 'node' as const,
   dts: true,
-  outExtension: () => ({ js: '.js' }),
+  clean: false,
+  fixedExtension: false,
+  external: ['@deepseek-ai/cordis'],
+}
+
+const client = {
+  name: `${id}/client`,
+  entry: { client: 'src/client/index.ts' },
+  outDir: 'lib',
+  format: 'cjs' as const,
+  platform: 'browser' as const,
+  dts: false,
   sourcemap: false,
-  clean: true,
-  // React comes from the shell's own React 18 (peerDependency) — never
-  // bundle a second copy into client.js.
-  external: ['react', 'react-dom', 'react/jsx-runtime'],
-})
+  clean: false,
+  // Externals must live in the shell's frozen platform module table
+  // (react, react/jsx-runtime, react-dom/client are seed entries).
+  external: ['react', 'react/jsx-runtime', 'react-dom/client'],
+  outputOptions: {
+    entryFileNames: 'client.js',
+    banner: `window.__ModuleLoader__.load({ id: ${JSON.stringify(id)}, factory: (require) => {`,
+    footer: 'return module.exports; } });',
+    intro: 'var module = { exports: {} }; var exports = module.exports;',
+  },
+}
+
+export default defineConfig([lib, client])
