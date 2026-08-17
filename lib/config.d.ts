@@ -13,10 +13,30 @@ export interface HookSpec {
      * (`completed`, `error`, …). Ignored for other events.
      */
     when?: TurnEndReasonKind;
+    /**
+     * Optional field → regex filters: every declared regex must match the
+     * context's field value for the hook to run. Fields are `HookContext`
+     * keys (`tool`, `sessionName`, `sessionId`, `error`, `source`, `cwd`,
+     * `content`, …); a field absent from the context never matches.
+     */
+    match?: Record<string, RegExp>;
     /** Command to spawn through the platform shell. */
     run: string;
+    /**
+     * How the context reaches the command. `env` (default) passes the
+     * `DSH_HOOK_*` variables only; `stdin` additionally writes the full
+     * context as one JSON document to the command's stdin.
+     */
+    input?: 'env' | 'stdin';
     /** Per-hook timeout in milliseconds. Defaults to 10000. */
     timeoutMs?: number;
+    /**
+     * Retry count for non-zero exit codes (default 0: fire-and-forget,
+     * never retried). Spawn failures and timeouts are never retried.
+     */
+    retries?: number;
+    /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
+    retryDelayMs?: number;
 }
 export interface Config {
     hooks?: HookSpec[];

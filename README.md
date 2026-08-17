@@ -31,7 +31,32 @@ Add a config block to your profile's `cordis.patch.yml`:
         timeoutMs: 10000             # optional, default 10000
       - on: 'approval/asked'
         run: 'powershell -Command "Write-Output approval-requested >> hooks.log"'
+      - on: 'tool/call'
+        match:                       # optional: field → regex, all must match
+          tool: '^(rm|git|ssh)'
+        run: 'node examples/notify-webhook.mjs --slack'
+      - on: 'turn/end'
+        when: 'completed'
+        run: 'node examples/notify-feishu.mjs'
+        retries: 2                   # optional: retry non-zero exits (default 0)
+        retryDelayMs: 1000           # optional: base retry delay, doubles (default 500)
+      - on: 'turn/end'
+        input: 'stdin'               # optional: write the full context JSON to stdin
+        run: 'node my-hook.mjs'
 ```
+
+Every hook field:
+
+| Field | Meaning | Default |
+| --- | --- | --- |
+| `on` | triggering event (see the event table) | required |
+| `when` | filter `turn/end` by end reason | all reasons |
+| `match` | field → regex, all must match; fields are context keys (`tool` / `sessionName` / `sessionId` / `error` / `source` / `cwd` / `content` / `reason`, …), a field absent from the context never matches | no filter |
+| `run` | command spawned through the platform shell | required |
+| `input` | `env` passes only the `DSH_HOOK_*` variables; `stdin` additionally writes the full context JSON to the command's stdin | `env` |
+| `timeoutMs` | per-run timeout (ms); the process tree is terminated on expiry | 10000 |
+| `retries` | retry count for non-zero exit codes (spawn failures and timeouts never retry) | 0 |
+| `retryDelayMs` | base delay between retries (ms), doubles per attempt | 500 |
 
 ## Events (v1)
 
@@ -56,7 +81,7 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 
 ## Command execution
 
-- Each matching hook spawns `run` through the platform shell, **fire-and-forget**: failures only `console.warn`, never retried, never block the agent loop.
+- Each matching hook spawns `run` through the platform shell, **fire-and-forget**: failures only `console.warn`, never retried by default (`retries` opts into background retries of non-zero exits), never block the agent loop. Command stdout/stderr is captured (64 KiB per stream); on a non-zero exit the stderr tail is appended to the warning log.
 - Context is passed via **environment variables** (no shell injection through data):
 
 | Variable | Meaning |

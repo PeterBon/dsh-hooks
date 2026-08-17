@@ -77,6 +77,14 @@ export declare function rememberTurnStart(session: Session): void;
 export declare function clearTurnTracking(session: Session): void;
 /** Does a declared hook match this event (type + optional `when` filter)? */
 export declare function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndReasonKind): boolean;
+/**
+ * Apply the optional `match` field → regex filters. Every declared regex
+ * must match its context field (String-coerced); a field the context does
+ * not carry never matches. An empty/absent `match` passes everything.
+ * RegExps come pre-compiled from the config schema; non-RegExp entries are
+ * rejected defensively (never match).
+ */
+export declare function matchFilters(match: Record<string, RegExp> | undefined, ctx: HookContext): boolean;
 export declare function turnEndContext(session: Session, turn: number, reason: TurnEndReason | string): HookContext;
 export declare function turnStartContext(session: Session, turn: number): HookContext;
 export declare function stepEndContext(session: Session, turn: number, step: number): HookContext;

@@ -12,6 +12,7 @@ export interface HookRunner {
     dispose(): void;
 }
 export declare const DEFAULT_TIMEOUT_MS = 10000;
+export declare const DEFAULT_RETRY_DELAY_MS = 500;
 /**
  * Terminate a spawned hook process. With `shell: true` on Windows the direct
  * child is cmd.exe — killing only the shell orphans the actual hook command
@@ -21,9 +22,11 @@ export declare const DEFAULT_TIMEOUT_MS = 10000;
 export declare function terminate(child: ChildProcess): void;
 /**
  * Fire-and-forget command runner. Emissions are irreversible side effects:
- * failures only warn, never retried, never block the agent loop.
- * Context travels through environment variables (no data interpolation into
- * the shell string); `{{var}}` placeholders are substituted from the same
- * map for explicit templating by the user.
+ * failures only warn, never block the agent loop. Context travels through
+ * environment variables (no data interpolation into the shell string);
+ * `{{var}}` placeholders are substituted from the same map for explicit
+ * templating by the user. `input: 'stdin'` additionally writes the full
+ * context as one JSON document to stdin, and `retries` re-spawns commands
+ * whose exit code is non-zero (with exponential backoff, in the background).
  */
 export declare function createHookRunner(log?: (line: string) => void): HookRunner;

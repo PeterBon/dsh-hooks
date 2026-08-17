@@ -10,6 +10,7 @@ import {
   classifySessionEvent,
   clearTurnTracking,
   hookMatches,
+  matchFilters,
   sessionCreatedContext,
   sessionDisposedContext,
   type AgentCreatedPayload,
@@ -35,6 +36,7 @@ export function apply(ctx: Context, config: Config = {}) {
   const runMatching = (ctxValue: HookContext, reasonKind?: TurnEndReasonKind): void => {
     for (const hook of hooks) {
       if (!hookMatches(hook, ctxValue.event, reasonKind)) continue
+      if (!matchFilters(hook.match, ctxValue)) continue
       runner.run(hook, ctxValue)
     }
   }
