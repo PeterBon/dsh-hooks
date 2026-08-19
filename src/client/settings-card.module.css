@@ -51,6 +51,33 @@
   letter-spacing: 0.04em;
 }
 
+.dh-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 8px;
+}
+
+.dh-section-head .dh-section-title {
+  margin: 0;
+}
+
+.dh-toggle {
+  padding: 2px 10px;
+  font-size: 11px;
+}
+
+.dh-field-narrow {
+  flex: 0 0 150px;
+}
+
+.dh-feishu-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
 .dh-timeline {
   display: flex;
   flex-direction: column;
@@ -241,5 +268,55 @@
   color: var(--dsh-hooks-bad);
   border-radius: 6px;
   padding: 8px 10px;
+  font-size: 12px;
+}
+
+/* Feishu connect section. */
+.dh-feishu {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dh-feishu-form,
+.dh-feishu-status,
+.dh-feishu-qr {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.dh-feishu-qr-img {
+  width: 220px;
+  height: 220px;
+  border: 1px solid var(--dsh-hooks-border);
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px;
+  box-sizing: border-box;
+}
+
+.dh-feishu-line {
+  font-size: 12px;
+}
+
+.dh-feishu-ok {
+  color: var(--dsh-hooks-ok);
+}
+
+.dh-feishu-error {
+  color: var(--dsh-hooks-bad);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.dh-feishu-hint {
+  color: var(--dsh-hooks-muted);
+  font-size: 11px;
+}
+
+.dh-feishu-link {
+  color: var(--dsh-hooks-accent);
   font-size: 12px;
 }

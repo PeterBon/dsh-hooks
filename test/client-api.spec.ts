@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
+  fetchFeishuStatus,
   fetchHistory,
   fetchStatus,
   formatTime,
   outcomeLabel,
   outcomeTone,
+  postFeishuCancel,
+  postFeishuConfig,
+  postFeishuSetup,
+  postFeishuTest,
   postTest,
 } from '../src/client/api.ts'
 
@@ -85,5 +90,90 @@ describe('formatters', () => {
     expect(outcomeTone('send-failed')).toBe('bad')
     expect(outcomeTone('timeout')).toBe('warn')
     expect(outcomeTone('spawned')).toBe('neutral')
+  })
+})
+
+describe('Feishu API client', () => {
+  it('fetches the connection summary and setup snapshot', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({
+        ok: true,
+        value: {
+          configured: false,
+          appId: null,
+          targetKind: null,
+          target: null,
+          setup: { status: 'pending', startedAt: 1, qrUrl: 'https://x', qrDataUrl: 'data:image/png;base64,x', expiresAtMs: 9999 },
+        },
+      }),
+    )
+    const result = await fetchFeishuStatus(fetchFn as unknown as typeof fetch)
+    expect(result?.setup?.status).toBe('pending')
+    expect(fetchFn).toHaveBeenCalledWith('/dsh-hooks/feishu/status', expect.anything())
+  })
+
+  it('posts the profile to start a scan session', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, value: { setup: { status: 'pending', startedAt: 1 } } }))
+    const result = await postFeishuSetup('work', undefined, fetchFn as unknown as typeof fetch)
+    expect(result).toMatchObject({ ok: true, setup: { status: 'pending' } })
+    const [url, init] = fetchFn.mock.calls[0] as [string, { method: string; body: string }]
+    expect(url).toBe('/dsh-hooks/feishu/setup')
+    expect(JSON.parse(init.body)).toEqual({ profile: 'work' })
+  })
+
+  it('posts the truncation length with the setup request', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, value: { setup: { status: 'pending', startedAt: 1 } } }))
+    await postFeishuSetup('web', 800, fetchFn as unknown as typeof fetch)
+    const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ profile: 'web', resultMaxChars: 800 })
+  })
+
+  it('surfaces a busy envelope error from setup', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: false, error: { code: 'pending', message: '已有进行中的扫码会话，请先取消或等待完成' } }, false, 409),
+    )
+    const result = await postFeishuSetup('web', undefined, fetchFn as unknown as typeof fetch)
+    expect(result).toEqual({ ok: false, error: '已有进行中的扫码会话，请先取消或等待完成' })
+  })
+
+  it('updates the truncation length via postFeishuConfig', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, value: { resultMaxChars: 1200 } }))
+    const result = await postFeishuConfig(1200, fetchFn as unknown as typeof fetch)
+    expect(result).toMatchObject({ ok: true, resultMaxChars: 1200 })
+    const [url, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(url).toBe('/dsh-hooks/feishu/config')
+    expect(JSON.parse(init.body)).toEqual({ resultMaxChars: 1200 })
+  })
+
+  it('surfaces truncation validation errors', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: false, error: { code: 'bad-request', message: '截断长度必须是 50–5000 之间的数字' } }, false, 400),
+    )
+    const result = await postFeishuConfig(10, fetchFn as unknown as typeof fetch)
+    expect(result).toEqual({ ok: false, error: '截断长度必须是 50–5000 之间的数字' })
+  })
+
+  it('cancels a pending session', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, value: { cancelled: true } }))
+    const result = await postFeishuCancel(fetchFn as unknown as typeof fetch)
+    expect(result.ok).toBe(true)
+  })
+
+  it('sends a test card and returns the message', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, value: { message: '✅ 测试卡片已发送' } }))
+    const result = await postFeishuTest(fetchFn as unknown as typeof fetch)
+    expect(result).toMatchObject({ ok: true, message: '✅ 测试卡片已发送' })
+  })
+
+  it('degrades to a network error on fetch failure', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(await postFeishuTest(vi.fn().mockRejectedValue(new Error('down')) as never)).toEqual({
+        ok: false,
+        error: '网络请求失败',
+      })
+    } finally {
+      warn.mockRestore()
+    }
   })
 })

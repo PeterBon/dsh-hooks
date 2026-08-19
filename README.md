@@ -143,7 +143,7 @@ The URL may also live in the dsh process environment as `DSH_HOOKS_WEBHOOK_URL` 
 
 ## Execution history
 
-Every hook trigger is recorded into an in-memory ring buffer (default 500 entries) and best-effort appended to `~/.dsh/dsh-hooks/history.jsonl` (0600) — for future UIs and debugging. Records never contain secrets (env vars never enter records):
+Every hook trigger is recorded into an in-memory ring buffer (default 500 entries) and best-effort appended to `~/.dsh/dsh-hooks/history.jsonl` (0600) — for future UIs and debugging. The ring buffer seeds from the JSONL at startup and live-syncs new appends on every web-panel read (including appends from other dsh processes sharing the file, e.g. a task-board Host), so history survives restarts. Records never contain secrets (env vars never enter records):
 
 ```yaml
 - id: dsh-hooks
@@ -179,8 +179,9 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually r
 After install, the dsh web settings panel gains a "Hooks" section (beside General and Plugins):
 
 - **Status badges**: plugin version, hook count, history count
-- **Execution-history timeline**: the latest 30 triggers (time / event / command / outcome / stderr tail), refreshed every 5s
 - **Manual tester**: pick an event (14 kinds) + reason/tool; "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks
+- **Feishu connect**: scan-to-connect inside the panel — the QR code renders inline (with expiry countdown and a cancel button); after the scan the app is created, credentials + hook config are written, and the connected summary offers a one-click test card, an inline truncation-length editor (50–5000 chars, default 300), and a re-connect flow
+- **Execution-history timeline**: at the bottom of the card, **collapsed by default** (an "expand" toggle opens the latest 30 triggers: time / event / command / outcome / stderr tail), refreshed every 5s
 
 CLI/headless environments are unaffected: the browser half loads only in the web GUI and the core has no UI runtime dependencies.
 
@@ -193,12 +194,28 @@ In the web profile (when the shared webServer service exists) dsh-hooks register
 | `/dsh-hooks/status` | GET | plugin version, hook count, history count |
 | `/dsh-hooks/history?n=50` | GET | the latest N execution records (JSON envelope) |
 | `/dsh-hooks/test` | POST | simulate an event: `{"event":"tool/call","tool":"ssh_exec","execute":false}` returns a per-hook match report; `execute: true` actually runs the matching hooks |
+| `/dsh-hooks/feishu/status` | GET | Feishu connection summary (app id / target masked, secret never leaves the server) + the scan-session snapshot + the truncation length |
+| `/dsh-hooks/feishu/setup` | POST | start a scan session: `{"profile":"web","resultMaxChars":800}`; returns the QR URL / PNG data URL / expiry (409 while one is pending) |
+| `/dsh-hooks/feishu/cancel` | POST | cancel the pending scan session (aborts the registerApp wait) |
+| `/dsh-hooks/feishu/config` | POST | update the card truncation length: `{"resultMaxChars":800}` (50–5000); effective immediately, credentials preserved |
+| `/dsh-hooks/feishu/test` | POST | send a test card with the stored credentials |
 
 Security matches dsh-aionui-panel: loopback-only, POSTs require `application/json` (blocks cross-site form CSRF). The web profile also gets a systemPrompt section announcing the plugin to agents.
 
 ## Feishu notification example
 
-The fastest path is the one-shot setup CLI — it creates the Feishu app for you via a QR-code scan and writes all hook config:
+Two ways to connect — the **Web GUI scan** (recommended, no terminal) or the one-shot setup CLI. Both create the Feishu app via a QR-code scan and write the same hook config.
+
+### Option 1: scan in the Web GUI
+
+Open the dsh web settings → "Hooks" section → "Feishu connect", fill in the profile (default `web`) and press the connect button:
+
+1. The panel shows the Feishu authorization QR code inline (with expiry countdown)
+2. Scanning creates an app named 「DSH 通知机器人」 (only the `im:message:send_as_bot` permission); the scanning user becomes the notification target
+3. The connected summary offers "send test card", an inline truncation-length editor (50–5000 chars, default 300, effective immediately), and "re-connect" (swap the bound app)
+4. Restart `dsh web` for the hooks to take effect
+
+### Option 2: setup CLI
 
 ```sh
 dsh-hooks feishu-setup                 # default profile: web
@@ -206,11 +223,13 @@ dsh-hooks feishu-setup --profile work  # another profile
 dsh-hooks feishu-test                  # send a test card with the stored credentials
 ```
 
-`feishu-setup` prints a QR code (and opens it in your browser), waits for you to scan it with Feishu, then creates an app named 「DSH 通知机器人」 with message-send permission and writes:
+`feishu-setup` prints a QR code (and opens it in your browser), waits for you to scan it with Feishu, then creates an app named 「DSH 通知机器人」 with message-send permission.
+
+Both options write the same files:
 
 | File | Purpose |
 | --- | --- |
-| `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret + your open_id as the notification target (0600, never committed); `result_max_chars` sets the card content truncation (default 300) |
+| `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret + your open_id as the notification target (0600, never committed); `result_max_chars` sets the card content truncation (default 300, editable in the Web GUI) |
 | `~/.dsh/dsh-hooks/notify-feishu.mjs` | stable copy of the notify script the hooks reference |
 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks block: `turn/end` (completed/error/aborted) + `approval/asked` + `agent/error` card hooks |
 
@@ -218,7 +237,7 @@ Restart `dsh web` afterwards — you will get cards when turns finish, approvals
 
 ![Feishu card example](assets/screenshot-1.jpg)
 
-### Manual configuration
+### Option 3: manual configuration
 
 Prefer wiring it by hand? See [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs) — a zero-dependency script that posts turn-completion / approval notices through the Feishu **app API** (works without a group custom bot). Configure it like:
 
