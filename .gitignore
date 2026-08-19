@@ -1,6 +1,8 @@
 node_modules/
 *.log
 .DS_Store
+# Local pnpm content-addressable store (install artifact).
+.pnpm-store/
 # feishu-config.json holds the app secret and must never be committed.
 feishu-config.json
 # lib/ IS committed: git-hosted plugin installs do not build (see README).

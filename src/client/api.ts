@@ -102,6 +102,89 @@ export async function postTest(body: TestRequest, fetchFn: typeof fetch = fetch)
   }
 }
 
+// ---- Feishu connect flow -------------------------------------------------
+
+export type FeishuSetupStatus = 'pending' | 'succeeded' | 'failed'
+
+export interface FeishuSetupSnapshot {
+  status: FeishuSetupStatus
+  startedAt: number
+  expiresAtMs?: number
+  qrUrl?: string
+  qrDataUrl?: string
+  appId?: string
+  error?: string
+}
+
+export interface FeishuStatusInfo {
+  configured: boolean
+  appId: string | null
+  targetKind: string | null
+  target: string | null
+  setup: FeishuSetupSnapshot | null
+  /** Card content truncation length (characters). */
+  resultMaxChars: number
+}
+
+export interface FeishuActionResult {
+  ok: boolean
+  error?: string
+  setup?: FeishuSetupSnapshot
+  message?: string
+  resultMaxChars?: number
+}
+
+/** POST a JSON action and surface the envelope result (error message included). */
+async function postFeishu(
+  path: string,
+  body: Record<string, unknown>,
+  fetchFn: typeof fetch,
+): Promise<FeishuActionResult> {
+  try {
+    const response = await fetchFn(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const envelope = (await response.json()) as Envelope<Record<string, unknown>>
+    if (!response.ok || !envelope.ok) {
+      return { ok: false, error: envelope.error?.message ?? `HTTP ${response.status}` }
+    }
+    const value = envelope.value ?? {}
+    return {
+      ok: true,
+      setup: value.setup as FeishuSetupSnapshot | undefined,
+      message: typeof value.message === 'string' ? value.message : undefined,
+      resultMaxChars: typeof value.resultMaxChars === 'number' ? value.resultMaxChars : undefined,
+    }
+  } catch (error) {
+    console.warn(`[dsh-hooks-ui] POST ${path} failed: ${error instanceof Error ? error.message : String(error)}`)
+    return { ok: false, error: '网络请求失败' }
+  }
+}
+
+export async function fetchFeishuStatus(fetchFn: typeof fetch = fetch): Promise<FeishuStatusInfo | null> {
+  return getJson<FeishuStatusInfo>('/dsh-hooks/feishu/status', fetchFn)
+}
+
+export async function postFeishuSetup(profile: string, resultMaxChars?: number, fetchFn: typeof fetch = fetch): Promise<FeishuActionResult> {
+  const body: Record<string, unknown> = { profile }
+  if (resultMaxChars !== undefined) body.resultMaxChars = resultMaxChars
+  return postFeishu('/dsh-hooks/feishu/setup', body, fetchFn)
+}
+
+export async function postFeishuConfig(resultMaxChars: number, fetchFn: typeof fetch = fetch): Promise<FeishuActionResult> {
+  return postFeishu('/dsh-hooks/feishu/config', { resultMaxChars }, fetchFn)
+}
+
+export async function postFeishuCancel(fetchFn: typeof fetch = fetch): Promise<FeishuActionResult> {
+  return postFeishu('/dsh-hooks/feishu/cancel', {}, fetchFn)
+}
+
+export async function postFeishuTest(fetchFn: typeof fetch = fetch): Promise<FeishuActionResult> {
+  return postFeishu('/dsh-hooks/feishu/test', {}, fetchFn)
+}
+
 /** `HH:MM:SS` local time for a timestamp. */
 export function formatTime(ts: number): string {
   const date = new Date(ts)

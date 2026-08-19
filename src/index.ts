@@ -22,6 +22,7 @@ import { eventLabel, type HookContext } from './context.js'
 import { createHookRunner } from './runner.js'
 import { fireNotify } from './notify.js'
 import { createHistorySink, type HistorySink } from './history.js'
+import { createFeishuSetupManager } from './feishu-session.js'
 import { registerHookRoutes, type WebServerLike } from './server.js'
 
 export const name = 'dsh-hooks'
@@ -46,13 +47,21 @@ export function apply(ctx: Context, config: Config = {}) {
   const history: HistorySink = createHistorySink(config.history ?? undefined)
   const runner = createHookRunner((line) => ctx.logger?.info(line), (record) => history.record(record))
 
-  // Web-profile extras: /dsh-hooks routes and the agent announcement. Both
-  // services are optional — CLI/headless profiles provide neither, and the
-  // plugin keeps working there untouched.
+  // Web-profile extras: /dsh-hooks routes (incl. the Feishu connect flow)
+  // and the agent announcement. Both services are optional — CLI/headless
+  // profiles provide neither, and the plugin keeps working there untouched.
   const webServer = ctx.get('webServer', false) as WebServerLike | undefined
   if (webServer !== undefined) {
+    const feishu = createFeishuSetupManager()
     ctx.effect(
-      () => registerHookRoutes(webServer, { hooks, history }),
+      () => {
+        const unregister = registerHookRoutes(webServer, { hooks, history, feishu: { manager: feishu } })
+        return () => {
+          unregister()
+          // Abort an in-flight QR scan so it never outlives the plugin.
+          feishu.dispose()
+        }
+      },
       'dsh-hooks: /dsh-hooks routes',
     )
   }

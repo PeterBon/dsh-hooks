@@ -29,6 +29,11 @@ export interface HistorySink {
     record(record: Omit<HookRunRecord, 'ts'>): void;
     /** Most recent records, oldest first. */
     recent(): readonly HookRunRecord[];
+    /**
+     * Ingest JSONL bytes appended since the last read (startup seed or another
+     * process). Idempotent and best-effort: failures leave the buffer as-is.
+     */
+    sync(): void;
     dispose(): void;
 }
 export declare function createHistorySink(options?: HistorySinkOptions): HistorySink;

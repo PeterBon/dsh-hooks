@@ -125,7 +125,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 
 ## 执行历史
 
-每次 hook 触发都会记入内存环形缓冲（默认 500 条），并 best-effort 追加到 `~/.dsh/dsh-hooks/history.jsonl`（权限 0600）——供未来 UI 与调试使用。记录不含 secret（环境变量从不入记录）：
+每次 hook 触发都会记入内存环形缓冲（默认 500 条），并 best-effort 追加到 `~/.dsh/dsh-hooks/history.jsonl`（权限 0600）——供未来 UI 与调试使用。环形缓冲在启动时从 JSONL 回填，且 Web 面板每次读取时增量同步磁盘上新增的记录（包括其他 dsh 进程的追加，如任务看板 Host），因此重启后历史不会消失。记录不含 secret（环境变量从不入记录）：
 
 ```yaml
 - id: dsh-hooks
@@ -161,8 +161,9 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # 端到端真跑匹配�
 安装后，dsh web 的设置面板里会出现「Hooks」分区（与「通用」「插件」平级）：
 
 - **状态徽章**：插件版本、hook 数、历史条数
-- **执行历史时间线**：最近 30 条触发（时间 / 事件 / 命令 / 结果 / stderr 尾部），5 秒自动刷新
 - **手动测试**：选事件（14 类）+ reason/tool，「模拟」看逐 hook 匹配报告，「执行」真实触发
+- **飞书通知**：网页内扫码连接飞书——显示二维码（含有效期倒计时、可取消），扫码后自动创建应用、写入凭据与 hook 配置；已连接后显示应用摘要，可一键发送测试卡片、调整卡片截断长度（50–5000 字符，默认 300）或重新扫码换绑
+- **执行历史时间线**：位于分区底部、**默认折叠**（标题旁「展开」查看最近 30 条触发：时间 / 事件 / 命令 / 结果 / stderr 尾部），5 秒自动刷新
 
 CLI/headless 环境完全不受影响：浏览器半只在 web 加载，核心零 UI 运行时依赖。
 
@@ -175,6 +176,11 @@ web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 loop
 | `/dsh-hooks/status` | GET | 插件版本、hook 数、历史条数 |
 | `/dsh-hooks/history?n=50` | GET | 最近 N 条执行历史（JSON envelope） |
 | `/dsh-hooks/test` | POST | 模拟事件评估：`{"event":"tool/call","tool":"ssh_exec","execute":false}` 返回逐 hook 匹配报告；`execute: true` 真跑匹配的 hook |
+| `/dsh-hooks/feishu/status` | GET | 飞书连接摘要（app id / 目标均已打码，绝不返回 secret）+ 扫码会话快照 + 截断长度 |
+| `/dsh-hooks/feishu/setup` | POST | 启动扫码会话：`{"profile":"web","resultMaxChars":800}`，返回二维码 URL / PNG data URL / 有效期；进行中时再次请求返回 409 |
+| `/dsh-hooks/feishu/cancel` | POST | 取消进行中的扫码会话（中止 registerApp 等待） |
+| `/dsh-hooks/feishu/config` | POST | 更新卡片截断长度：`{"resultMaxChars":800}`（50–5000），即时生效，保留凭据 |
+| `/dsh-hooks/feishu/test` | POST | 用已存凭据发送测试卡片 |
 
 安全约定与 dsh-aionui-panel 一致：仅回环地址可达、POST 必须 `application/json`（防跨站表单 CSRF）。同时 web profile 下会向 agent 注入一段 systemPrompt 公告，说明插件存在与协作方式。
 
@@ -198,7 +204,18 @@ URL 也可放在 dsh 进程环境的 `DSH_HOOKS_WEBHOOK_URL`（不要写进配�
 
 ## 飞书通知示例
 
-最快的方式是一步到位的 setup CLI——扫码自动创建飞书应用并写好全部 hook 配置：
+两种接入方式任选：**Web GUI 扫码**（推荐，无需终端）或 **setup CLI**——扫码自动创建飞书应用并写好全部 hook 配置。
+
+### 方式一：Web GUI 扫码
+
+打开 dsh web 设置 → 「Hooks」分区 → 「飞书通知」，填好 profile（默认 `web`）点「扫码连接飞书」：
+
+1. 面板内显示飞书授权二维码（含有效期倒计时）
+2. 用飞书扫码，自动创建名为「DSH 通知机器人」的应用（仅 `im:message:send_as_bot` 权限），扫码者本人为通知接收人
+3. 连接完成后显示应用摘要，可「发送测试卡片」验证、直接修改卡片截断长度（50–5000 字符，默认 300，即时生效），「重新连接」可换绑新应用
+4. 重启 `dsh web` 生效
+
+### 方式二：setup CLI
 
 ```sh
 dsh-hooks feishu-setup                 # 默认 profile：web
@@ -206,11 +223,13 @@ dsh-hooks feishu-setup --profile work  # 指定其他 profile
 dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
 ```
 
-`feishu-setup` 会打印二维码（并在浏览器中打开），等你用飞书扫码后，自动创建名为「DSH 通知机器人」的应用（带消息发送权限），并写入：
+`feishu-setup` 会打印二维码（并在浏览器中打开），等你用飞书扫码后，自动创建名为「DSH 通知机器人」的应用（带消息发送权限）。
+
+两种方式写入的文件相同：
 
 | 文件 | 用途 |
 | --- | --- |
-| `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret 与你的 open_id（通知目标），权限 0600，严禁提交；`result_max_chars` 控制卡片内容截断长度（默认 300） |
+| `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret 与你的 open_id（通知目标），权限 0600，严禁提交；`result_max_chars` 控制卡片内容截断长度（默认 300，可在 Web GUI 中修改） |
 | `~/.dsh/dsh-hooks/notify-feishu.mjs` | hook 引用的通知脚本稳定副本 |
 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks 配置块：`turn/end`（completed/error/aborted）+ `approval/asked` + `agent/error` 卡片 hook |
 
@@ -218,7 +237,7 @@ dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
 
 ![飞书卡片示例](assets/screenshot-1.jpg)
 
-### 手动配置
+### 方式三：手动配置
 
 想自己接线？见 [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs)——零依赖脚本，通过飞书**应用 API**（不需要群自定义机器人）发送回合完成 / 审批通知。配置示例：
 

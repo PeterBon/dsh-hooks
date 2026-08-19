@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -81,5 +81,68 @@ describe('createHistorySink', () => {
     const sink = createHistorySink({ path: join(blocker, 'sub', 'history.jsonl') })
     expect(() => sink.record(sample)).not.toThrow()
     expect(sink.recent()).toHaveLength(1) // memory buffer still works
+  })
+})
+
+describe('disk seeding and sync', () => {
+  const line = (event: string, ts: number) => JSON.stringify({ ...sample, event, ts }) + '\n'
+
+  it('seeds the buffer from an existing JSONL at startup', () => {
+    const file = join(tmp, 'history.jsonl')
+    writeFileSync(file, line('event-0', 1000) + line('event-1', 2000), 'utf8')
+    const sink = createHistorySink({ path: file })
+    expect(sink.recent().map((r) => r.event)).toEqual(['event-0', 'event-1'])
+  })
+
+  it('seeds only the newest max records', () => {
+    const file = join(tmp, 'history.jsonl')
+    writeFileSync(file, line('a', 1) + line('b', 2) + line('c', 3), 'utf8')
+    const sink = createHistorySink({ path: file, max: 2 })
+    expect(sink.recent().map((r) => r.event)).toEqual(['b', 'c'])
+  })
+
+  it('sync ingests appends from another process, idempotently', () => {
+    const file = join(tmp, 'history.jsonl')
+    writeFileSync(file, line('a', 1), 'utf8')
+    const sink = createHistorySink({ path: file })
+    appendFileSync(file, line('b', 2), 'utf8')
+    sink.sync()
+    sink.sync() // second call must not duplicate
+    expect(sink.recent().map((r) => r.event)).toEqual(['a', 'b'])
+  })
+
+  it('record ingests external appends before writing its own', () => {
+    const file = join(tmp, 'history.jsonl')
+    writeFileSync(file, line('a', 1), 'utf8')
+    const sink = createHistorySink({ path: file })
+    appendFileSync(file, line('b', 2), 'utf8') // other process
+    sink.record({ ...sample, event: 'c' })
+    expect(sink.recent().map((r) => r.event)).toEqual(['a', 'b', 'c'])
+    // And the file holds all three, in order.
+    const lines = readFileSync(file, 'utf8').trim().split('\n')
+    expect(lines).toHaveLength(3)
+    expect(JSON.parse(lines[2]).event).toBe('c')
+  })
+
+  it('skips broken lines and survives truncation', () => {
+    const file = join(tmp, 'history.jsonl')
+    writeFileSync(file, line('a', 1), 'utf8')
+    const sink = createHistorySink({ path: file })
+    appendFileSync(file, 'not-json\n', 'utf8')
+    sink.sync()
+    expect(sink.recent().map((r) => r.event)).toEqual(['a'])
+    // Truncate to one line; the buffer rebuilds from what remains.
+    writeFileSync(file, line('z', 9), 'utf8')
+    sink.sync()
+    expect(sink.recent().map((r) => r.event)).toEqual(['z'])
+  })
+
+  it('never reads the disk when persistence is disabled', () => {
+    const file = join(tmp, 'history.jsonl')
+    writeFileSync(file, line('a', 1), 'utf8')
+    const sink = createHistorySink({ enabled: false, path: file })
+    expect(sink.recent()).toEqual([])
+    sink.sync()
+    expect(sink.recent()).toEqual([])
   })
 })
