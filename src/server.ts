@@ -1,21 +1,25 @@
 /**
- * /dsh-hooks/* HTTP routes for the web profile: status, execution history,
- * a dry-run-style test trigger, and the Feishu connect flow (QR setup /
- * cancel / test card). Registered only when the shared webserver service
- * exists (web profile) — CLI/headless environments never see them.
- * Loopback-only with JSON envelopes; POSTs require an explicit
- * application/json content-type (CSRF hardening, same posture as
- * dsh-aionui-panel).
+ * /dsh-hooks/* HTTP routes for the web profile: status (incl. the hook
+ * list and live runner stats), execution history, a dry-run-style test
+ * trigger, notify-channel quick tests, the hook-list editor (writes back
+ * to the profile's cordis.patch.yml with a backup), and the Feishu connect
+ * flow (QR setup / cancel / config / test card / disconnect). Registered
+ * only when the shared webserver service exists (web profile) — CLI/headless
+ * environments never see them. Loopback-only with JSON envelopes; POSTs
+ * require an explicit application/json content-type (CSRF hardening, same
+ * posture as dsh-aionui-panel).
  */
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import type { HookSpec } from './config.js'
 import type { HistorySink } from './history.js'
-import { describeHook, evaluateHooks, mockContext } from './dry-run.js'
-import { createHookRunner } from './runner.js'
-import { fireNotify } from './notify.js'
+import { describeHook, evaluateHooks, mockContext, patchFilePath } from './dry-run.js'
+import { createHookRunner, type HookRunner } from './runner.js'
+import { fireNotify, summarizeContext } from './notify.js'
+import type { HookContext } from './context.js'
 import { FEISHU_SETUP_BUSY, type FeishuSetupManager } from './feishu-session.js'
-import { readFeishuSummary, runFeishuTest, updateFeishuResultMaxChars } from './feishu.js'
+import { deleteFeishuConfig, readFeishuSummary, runFeishuTest, updateFeishuResultMaxChars } from './feishu.js'
+import { removeScriptHooks, writeHooksConfig, type HookWireSpec } from './patch-config.js'
 
 /** Minimal structural shape of the shared web server (dsh-host-webserver). */
 export interface WebServerLike {
@@ -89,7 +93,35 @@ export interface HookRoutesOptions {
   history: HistorySink
   version?: string
   feishu?: FeishuRouteDeps
+  /** Live runner counters for the diagnostics badge. */
+  runner?: Pick<HookRunner, 'stats'>
+  /** Profile → patch-file resolver, injectable so tests never touch the real home. */
+  resolvePatchFile?: (profile: string) => string
 }
+
+/** Sanitized per-hook description for the settings panel (regex sources, no RegExp objects). */
+export function describeHooks(hooks: readonly HookSpec[]) {
+  return hooks.map((hook, i) => ({
+    index: i + 1,
+    on: hook.on,
+    when: hook.when,
+    match:
+      hook.match === undefined
+        ? undefined
+        : Object.fromEntries(Object.entries(hook.match).map(([field, re]) => [field, re.source])),
+    run: hook.run,
+    notify:
+      hook.notify === undefined || hook.notify === null
+        ? undefined
+        : { channel: hook.notify.channel, url: hook.notify.url, slack: hook.notify.slack },
+    input: hook.input,
+    timeoutMs: hook.timeoutMs,
+    retries: hook.retries,
+    retryDelayMs: hook.retryDelayMs,
+  }))
+}
+
+const FAILED_OUTCOMES = new Set(['exit-nonzero', 'timeout', 'spawn-failed', 'send-failed'])
 
 /** Create the /dsh-hooks route handler (exported for tests). */
 export function createHookHandler(options: HookRoutesOptions) {
@@ -98,6 +130,8 @@ export function createHookHandler(options: HookRoutesOptions) {
   const feishu = options.feishu
   const runFeishuTestCard = feishu?.runTest ?? runFeishuTest
   const feishuConfigPath = feishu?.configPath
+  const runnerStats = options.runner?.stats ?? (() => ({ inFlight: 0, pendingRetries: 0 }))
+  const resolvePatch = options.resolvePatchFile ?? patchFilePath
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (!isLoopbackRequest(req)) {
@@ -111,7 +145,19 @@ export function createHookHandler(options: HookRoutesOptions) {
       // Pull in disk records (pre-restart and other-process appends) so the
       // badge reflects the durable log, not just this process's memory.
       history.sync()
-      json(res, OK({ name: 'dsh-hooks', version, hookCount: hooks.length, historyCount: history.recent().length }))
+      const records = history.recent()
+      const recentFailures = records.filter((record) => FAILED_OUTCOMES.has(record.outcome)).length
+      json(
+        res,
+        OK({
+          name: 'dsh-hooks',
+          version,
+          hookCount: hooks.length,
+          historyCount: records.length,
+          hooks: describeHooks(hooks),
+          stats: { ...runnerStats(), recentFailures },
+        }),
+      )
       return
     }
     if (req.method === 'GET' && pathname === '/dsh-hooks/history') {
@@ -257,6 +303,109 @@ export function createHookHandler(options: HookRoutesOptions) {
         const message = error instanceof Error ? error.message : String(error)
         json(res, FAIL('send-failed', message), 500)
       }
+      return
+    }
+    if (req.method === 'POST' && pathname === '/dsh-hooks/notify/test') {
+      const contentType = req.headers['content-type'] ?? ''
+      if (!contentType.toLowerCase().startsWith('application/json')) {
+        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+        return
+      }
+      const payload = await readJsonBody(req)
+      if (typeof payload !== 'object' || payload === null) {
+        json(res, FAIL('bad-request', 'malformed JSON body'), 400)
+        return
+      }
+      const body = payload as Record<string, unknown>
+      const channel = body.channel
+      if (channel !== 'webhook' && channel !== 'desktop') {
+        json(res, FAIL('bad-request', '缺少字段 channel（webhook 或 desktop）'), 400)
+        return
+      }
+      const ctx: HookContext = {
+        event: 'user/message',
+        sessionId: 'notify-test',
+        sessionName: '通知测试',
+        source: 'plugin',
+        content: '这是一条 dsh-hooks 测试通知：如果收到这条消息，说明该渠道配置正常。',
+        timestamp: new Date().toISOString(),
+      }
+      const result = await fireNotify(
+        {
+          channel,
+          url: typeof body.url === 'string' && body.url !== '' ? body.url : undefined,
+          slack: body.slack === true,
+        },
+        ctx,
+        (record) => history.record(record),
+      )
+      if (!result.ok) {
+        json(res, FAIL('send-failed', result.error ?? '发送失败'), 500)
+        return
+      }
+      json(res, OK({ message: '✅ 测试通知已发送', preview: summarizeContext(ctx) }))
+      return
+    }
+    if (req.method === 'POST' && pathname === '/dsh-hooks/hooks/save') {
+      const contentType = req.headers['content-type'] ?? ''
+      if (!contentType.toLowerCase().startsWith('application/json')) {
+        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+        return
+      }
+      const payload = await readJsonBody(req)
+      if (typeof payload !== 'object' || payload === null) {
+        json(res, FAIL('bad-request', 'malformed JSON body'), 400)
+        return
+      }
+      const body = payload as Record<string, unknown>
+      const profile = typeof body.profile === 'string' && body.profile.trim() !== '' ? body.profile.trim() : 'web'
+      const wireHooks = body.hooks
+      if (!Array.isArray(wireHooks)) {
+        json(res, FAIL('bad-request', '缺少数组字段 hooks'), 400)
+        return
+      }
+      const patchFile = resolvePatch(profile)
+      try {
+        const result = writeHooksConfig(patchFile, wireHooks as HookWireSpec[])
+        json(
+          res,
+          OK({
+            profile,
+            hookCount: result.hookCount,
+            patchFile: result.patchFile,
+            backupPath: result.backupPath,
+            message: `✅ 已保存 ${result.hookCount} 个 hook 到 ${profile} profile（已备份原文件）。若未立即生效请重启 dsh web。`,
+          }),
+        )
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        json(res, FAIL('save-failed', message), 400)
+      }
+      return
+    }
+    if (feishu !== undefined && req.method === 'POST' && pathname === '/dsh-hooks/feishu/disconnect') {
+      const contentType = req.headers['content-type'] ?? ''
+      if (!contentType.toLowerCase().startsWith('application/json')) {
+        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+        return
+      }
+      const payload = await readJsonBody(req)
+      const body = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>
+      const profile = typeof body.profile === 'string' && body.profile.trim() !== '' ? body.profile.trim() : 'web'
+      const removeHooks = body.removeHooks === true
+      // Abort any in-flight scan session first.
+      feishu.manager.cancel()
+      const existed = deleteFeishuConfig(feishuConfigPath)
+      if (removeHooks) {
+        try {
+          removeScriptHooks(resolvePatch(profile), 'notify-feishu.mjs')
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          json(res, FAIL('save-failed', message), 400)
+          return
+        }
+      }
+      json(res, OK({ disconnected: true, existed, removedHooks: removeHooks, message: '✅ 已断开飞书连接' }))
       return
     }
     json(res, FAIL('not-found', `unknown route ${pathname}`), 404)

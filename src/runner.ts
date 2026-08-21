@@ -13,7 +13,16 @@ export interface RunOutcome {
 /** Track in-flight hook runs so a missing parent never outlives teardown. */
 export interface HookRunner {
   run(spec: HookSpec, ctx: HookContext): RunOutcome
+  /** Live counters for the web-panel diagnostics. */
+  stats(): HookRunnerStats
   dispose(): void
+}
+
+export interface HookRunnerStats {
+  /** Spawned children still running (waiting for their exit). */
+  inFlight: number
+  /** Retry timers scheduled in the background. */
+  pendingRetries: number
 }
 
 export type RunRecord = (record: Omit<HookRunRecord, 'ts'>) => void
@@ -167,5 +176,9 @@ export function createHookRunner(log: (line: string) => void = console.log, reco
     children.clear()
   }
 
-  return { run, dispose }
+  function stats(): HookRunnerStats {
+    return { inFlight: children.size, pendingRetries: pendingRetries.size }
+  }
+
+  return { run, stats, dispose }
 }

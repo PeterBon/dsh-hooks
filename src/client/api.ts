@@ -5,11 +5,46 @@
  * never throws: the panel must degrade, not crash.
  */
 
+/** One hook as the status route describes it (string regexes, no secrets). */
+export interface HookDescriptor {
+  index: number
+  on: string
+  when?: string
+  match?: Record<string, string>
+  run?: string
+  notify?: { channel: 'webhook' | 'desktop'; url?: string; slack?: boolean }
+  input?: 'env' | 'stdin'
+  timeoutMs?: number
+  retries?: number
+  retryDelayMs?: number
+}
+
+/** Wire shape the hook editor saves back (string regexes). */
+export interface HookWireSpec {
+  on: string
+  when?: string
+  match?: Record<string, string>
+  run?: string
+  notify?: { channel: 'webhook' | 'desktop'; url?: string; slack?: boolean } | null
+  input?: 'env' | 'stdin'
+  timeoutMs?: number
+  retries?: number
+  retryDelayMs?: number
+}
+
+export interface HookStats {
+  inFlight: number
+  pendingRetries: number
+  recentFailures: number
+}
+
 export interface StatusInfo {
   name: string
   version: string
   hookCount: number
   historyCount: number
+  hooks: HookDescriptor[]
+  stats: HookStats
 }
 
 export type HistoryKind = 'run' | 'notify'
@@ -124,6 +159,8 @@ export interface FeishuStatusInfo {
   setup: FeishuSetupSnapshot | null
   /** Card content truncation length (characters). */
   resultMaxChars: number
+  /** Sample card content truncated at resultMaxChars. */
+  preview: string
 }
 
 export interface FeishuActionResult {
@@ -183,6 +220,81 @@ export async function postFeishuCancel(fetchFn: typeof fetch = fetch): Promise<F
 
 export async function postFeishuTest(fetchFn: typeof fetch = fetch): Promise<FeishuActionResult> {
   return postFeishu('/dsh-hooks/feishu/test', {}, fetchFn)
+}
+
+// ---- hook editor / notify tests / feishu disconnect ----------------------
+
+export interface ActionValue {
+  message?: string
+  preview?: string
+  hookCount?: number
+  patchFile?: string
+  backupPath?: string
+  disconnected?: boolean
+  existed?: boolean
+  removedHooks?: boolean
+}
+
+/** POST a JSON action; returns the envelope value plus its error message. */
+async function postValue(
+  path: string,
+  body: Record<string, unknown>,
+  fetchFn: typeof fetch,
+): Promise<FeishuActionResult & ActionValue> {
+  try {
+    const response = await fetchFn(path, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const envelope = (await response.json()) as Envelope<Record<string, unknown>>
+    if (!response.ok || !envelope.ok) {
+      return { ok: false, error: envelope.error?.message ?? `HTTP ${response.status}` }
+    }
+    const value = envelope.value ?? {}
+    return {
+      ok: true,
+      message: typeof value.message === 'string' ? value.message : undefined,
+      preview: typeof value.preview === 'string' ? value.preview : undefined,
+      hookCount: typeof value.hookCount === 'number' ? value.hookCount : undefined,
+      patchFile: typeof value.patchFile === 'string' ? value.patchFile : undefined,
+      backupPath: typeof value.backupPath === 'string' ? value.backupPath : undefined,
+      disconnected: typeof value.disconnected === 'boolean' ? value.disconnected : undefined,
+      existed: typeof value.existed === 'boolean' ? value.existed : undefined,
+      removedHooks: typeof value.removedHooks === 'boolean' ? value.removedHooks : undefined,
+    }
+  } catch (error) {
+    console.warn(`[dsh-hooks-ui] POST ${path} failed: ${error instanceof Error ? error.message : String(error)}`)
+    return { ok: false, error: '网络请求失败' }
+  }
+}
+
+export async function postNotifyTest(
+  channel: 'webhook' | 'desktop',
+  url: string | undefined,
+  slack: boolean,
+  fetchFn: typeof fetch = fetch,
+): Promise<FeishuActionResult & ActionValue> {
+  const body: Record<string, unknown> = { channel }
+  if (url !== undefined && url !== '') body.url = url
+  if (slack) body.slack = true
+  return postValue('/dsh-hooks/notify/test', body, fetchFn)
+}
+
+export async function postHooksSave(
+  profile: string,
+  hooks: HookWireSpec[],
+  fetchFn: typeof fetch = fetch,
+): Promise<FeishuActionResult & ActionValue> {
+  return postValue('/dsh-hooks/hooks/save', { profile, hooks }, fetchFn)
+}
+
+export async function postFeishuDisconnect(
+  profile: string,
+  removeHooks: boolean,
+  fetchFn: typeof fetch = fetch,
+): Promise<FeishuActionResult & ActionValue> {
+  return postValue('/dsh-hooks/feishu/disconnect', { profile, removeHooks }, fetchFn)
 }
 
 /** `HH:MM:SS` local time for a timestamp. */

@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -322,6 +322,156 @@ describe('Feishu routes', () => {
     const res = fakeRes()
     await handler(fakeReq({ url: '/dsh-hooks/feishu/status' }), res)
     expect(readJson(res).statusCode).toBe(404)
+  })
+
+  it('disconnects Feishu and removes the notify hooks', async () => {
+    writeFileSync(configPath, JSON.stringify({ app_id: 'cli_x', app_secret: 's', target_id: 'ou_x' }), 'utf8')
+    const patchFile = join(tmp, 'web.yml')
+    writeFileSync(
+      patchFile,
+      [
+        '- id: dsh-hooks',
+        '  config:',
+        '    hooks:',
+        "      - { on: turn/end, when: completed, run: node C:/x/notify-feishu.mjs }",
+        "      - { on: tool/call, run: echo keep }",
+      ].join('\n'),
+      'utf8',
+    )
+    const handler = createHookHandler({
+      hooks,
+      history: createHistorySink({ enabled: false }),
+      feishu: { manager: fakeManager(), configPath },
+      resolvePatchFile: () => patchFile,
+    })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/feishu/disconnect', { profile: 'web', removeHooks: true }), res)
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(200)
+    expect(body).toMatchObject({ ok: true, value: { disconnected: true, existed: true, removedHooks: true } })
+    expect(existsSync(configPath)).toBe(false)
+    const saved = readFileSync(patchFile, 'utf8')
+    expect(saved).not.toContain('notify-feishu.mjs')
+    expect(saved).toContain('echo keep')
+  })
+})
+
+describe('hook list, notify tests, and the hooks editor routes', () => {
+  let tmp: string
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'dsh-hooks-server-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  it('exposes the hook list and runner stats on /status', async () => {
+    const history = createHistorySink({ enabled: false })
+    history.record({ kind: 'run', event: 'turn/end', command: 'x', outcome: 'exit-nonzero', exitCode: 1 })
+    const handler = createHookHandler({
+      hooks,
+      history,
+      version: '9.9.9',
+      runner: { stats: () => ({ inFlight: 2, pendingRetries: 1 }) },
+    })
+    const res = fakeRes()
+    await handler(fakeReq(), res)
+    const { body } = readJson(res)
+    const value = (body as { value: Record<string, unknown> }).value
+    expect(value.hookCount).toBe(2)
+    expect((value.hooks as { on: string }[]).map((hook) => hook.on)).toEqual(['turn/end', 'tool/call'])
+    expect(value.stats).toEqual({ inFlight: 2, pendingRetries: 1, recentFailures: 1 })
+  })
+
+  it('sends a webhook channel test and reports the preview', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true } as Response))
+    try {
+      const history = createHistorySink({ enabled: false })
+      const handler = createHookHandler({ hooks, history })
+      const res = fakeRes()
+      await handler(bodyReq('/dsh-hooks/notify/test', { channel: 'webhook', url: 'https://x.test/hook' }), res)
+      const { statusCode, body } = readJson(res)
+      expect(statusCode).toBe(200)
+      expect(body).toMatchObject({
+        ok: true,
+        value: { message: expect.any(String), preview: expect.stringContaining('测试通知') },
+      })
+      expect(history.recent()).toHaveLength(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('reports channel test failures (no webhook URL)', async () => {
+    const history = createHistorySink({ enabled: false })
+    const handler = createHookHandler({ hooks, history })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/notify/test', { channel: 'webhook' }), res)
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(500)
+    expect(body).toMatchObject({ ok: false, error: { code: 'send-failed' } })
+  })
+
+  it('rejects unknown notify channels', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/notify/test', { channel: 'email' }), res)
+    expect(readJson(res).statusCode).toBe(400)
+  })
+
+  it('saves the hook list into the resolved patch file (with a backup)', async () => {
+    const patchFile = join(tmp, 'web.yml')
+    const handler = createHookHandler({
+      hooks,
+      history: createHistorySink({ enabled: false }),
+      resolvePatchFile: () => patchFile,
+    })
+    const res = fakeRes()
+    await handler(
+      bodyReq('/dsh-hooks/hooks/save', {
+        profile: 'web',
+        hooks: [
+          { on: 'turn/end', when: 'completed', run: 'node x.mjs' },
+          { on: 'tool/call', match: { tool: '^(rm|git)' }, notify: { channel: 'desktop' } },
+        ],
+      }),
+      res,
+    )
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(200)
+    expect(body).toMatchObject({ ok: true, value: { hookCount: 2 } })
+    const saved = readFileSync(patchFile, 'utf8')
+    expect(saved).toContain('node x.mjs')
+    expect(saved).toContain('channel: desktop')
+    const { readdirSync } = require('node:fs') as typeof import('node:fs')
+    expect(readdirSync(tmp).some((name) => name.includes('.bak-'))).toBe(true)
+  })
+
+  it('rejects invalid hook lists on save', async () => {
+    const patchFile = join(tmp, 'web.yml')
+    const handler = createHookHandler({
+      hooks,
+      history: createHistorySink({ enabled: false }),
+      resolvePatchFile: () => patchFile,
+    })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/hooks/save', { profile: 'web', hooks: [{ on: 'nope', run: 'x' }] }), res)
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(400)
+    expect(body).toMatchObject({ ok: false, error: { code: 'save-failed' } })
+    expect(existsSync(patchFile)).toBe(false)
+  })
+
+  it('requires application/json on editor and notify POSTs', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/hooks/save', {}, { 'content-type': 'text/plain' }), res)
+    expect(readJson(res).statusCode).toBe(415)
+    const res2 = fakeRes()
+    await handler(bodyReq('/dsh-hooks/notify/test', {}, { 'content-type': 'text/plain' }), res2)
+    expect(readJson(res2).statusCode).toBe(415)
   })
 })
 

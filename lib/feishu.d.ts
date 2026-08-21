@@ -105,12 +105,18 @@ export interface FeishuSummary {
     target: string | null;
     /** Card content truncation length (from the credential file, or the default). */
     resultMaxChars: number;
+    /** Sample card content truncated at `resultMaxChars` (editor preview). */
+    preview: string;
 }
+/** Truncate the preview sample the way the notify script truncates content. */
+export declare function truncatePreview(text: string, max: number): string;
 /**
  * Inspect the credential file for a display-only summary. The app secret is
  * read for presence only and never enters any returned value.
  */
 export declare function readFeishuSummary(configPath?: string): FeishuSummary;
+/** Delete the credential file; returns whether it existed. */
+export declare function deleteFeishuConfig(configPath?: string): boolean;
 /**
  * Update the card truncation length in an existing credential file, keeping
  * every other field (credentials, target) untouched. Throws a user-facing

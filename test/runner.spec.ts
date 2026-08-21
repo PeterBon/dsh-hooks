@@ -260,4 +260,15 @@ describe('createHookRunner', () => {
     runner.dispose()
     expect(fakeChildRef.killed).toBe(true)
   })
+
+  it('stats reports in-flight children and pending retries', () => {
+    const runner = createHookRunner()
+    expect(runner.stats()).toEqual({ inFlight: 0, pendingRetries: 0 })
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+    runner.run({ on: 'turn/start', run: 'x' }, { event: 'turn/start', timestamp: 'T' })
+    expect(runner.stats().inFlight).toBe(1)
+    runner.dispose()
+    expect(runner.stats().inFlight).toBe(0)
+  })
 })

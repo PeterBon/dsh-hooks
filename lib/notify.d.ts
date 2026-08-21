@@ -24,5 +24,5 @@ export declare function sendWebhook(spec: NotifySpec, ctx: HookContext, env?: No
  * through shell-string interpolation.
  */
 export declare function sendDesktop(spec: NotifySpec, ctx: HookContext): Promise<NotifyResult>;
-/** Fire a built-in notification; failures only warn. */
-export declare function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord): Promise<void>;
+/** Fire a built-in notification; failures only warn and surface in the result. */
+export declare function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord): Promise<NotifyResult>;
