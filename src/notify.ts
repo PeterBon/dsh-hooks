@@ -179,8 +179,8 @@ function runAndWait(argv: string[], env: Record<string, string>, timeoutMs: numb
   })
 }
 
-/** Fire a built-in notification; failures only warn. */
-export async function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord): Promise<void> {
+/** Fire a built-in notification; failures only warn and surface in the result. */
+export async function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord): Promise<NotifyResult> {
   const startedAt = Date.now()
   const result = spec.channel === 'webhook' ? await sendWebhook(spec, ctx) : await sendDesktop(spec, ctx)
   if (!result.ok) {
@@ -195,7 +195,7 @@ export async function fireNotify(spec: NotifySpec, ctx: HookContext, record?: No
       durationMs: Date.now() - startedAt,
       error: result.error,
     })
-    return
+    return result
   }
   record?.({
     kind: 'notify',
@@ -206,4 +206,5 @@ export async function fireNotify(spec: NotifySpec, ctx: HookContext, record?: No
     outcome: 'sent',
     durationMs: Date.now() - startedAt,
   })
+  return result
 }

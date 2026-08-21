@@ -9,7 +9,7 @@
  * time: the SDK resolves through a dynamic import on first setup, so
  * headless/CLI profiles without a web server pay nothing for the UI path.
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import YAML from 'yaml'
@@ -304,6 +304,22 @@ export interface FeishuSummary {
   target: string | null
   /** Card content truncation length (from the credential file, or the default). */
   resultMaxChars: number
+  /** Sample card content truncated at `resultMaxChars` (editor preview). */
+  preview: string
+}
+
+/** Sample text long enough to demonstrate any truncation length. */
+const PREVIEW_SAMPLE =
+  '✅ 任务已完成 · 示例会话（回合 #42）。本轮完成了依赖安装、代码实现与全部测试验证，' +
+  '飞书卡片正文会按设定的截断长度折叠，超出部分在行边界处省略并追加省略号。' +
+  '你可以用下面的长度输入框调整它，保存后立即生效，无需重启 dsh web。'.repeat(6)
+
+/** Truncate the preview sample the way the notify script truncates content. */
+export function truncatePreview(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max)
+  const lastNl = cut.lastIndexOf('\n')
+  return (lastNl > max / 2 ? cut.slice(0, lastNl) : cut) + '…'
 }
 
 /**
@@ -317,6 +333,7 @@ export function readFeishuSummary(configPath: string = FEISHU_CONFIG_PATH): Feis
     targetKind: null,
     target: null,
     resultMaxChars: FEISHU_RESULT_MAX_CHARS_DEFAULT,
+    preview: truncatePreview(PREVIEW_SAMPLE, FEISHU_RESULT_MAX_CHARS_DEFAULT),
   }
   if (!existsSync(configPath)) return empty
   try {
@@ -335,11 +352,19 @@ export function readFeishuSummary(configPath: string = FEISHU_CONFIG_PATH): Feis
       typeof file.result_max_chars === 'number' && Number.isFinite(file.result_max_chars) && file.result_max_chars > 0
         ? Math.floor(file.result_max_chars)
         : FEISHU_RESULT_MAX_CHARS_DEFAULT
-    if (appId === null || !secret || target === null) return { ...empty, resultMaxChars }
-    return { configured: true, appId: maskId(appId), targetKind, target: maskId(target), resultMaxChars }
+    const preview = truncatePreview(PREVIEW_SAMPLE, resultMaxChars)
+    if (appId === null || !secret || target === null) return { ...empty, resultMaxChars, preview }
+    return { configured: true, appId: maskId(appId), targetKind, target: maskId(target), resultMaxChars, preview }
   } catch {
     return empty
   }
+}
+
+/** Delete the credential file; returns whether it existed. */
+export function deleteFeishuConfig(configPath: string = FEISHU_CONFIG_PATH): boolean {
+  if (!existsSync(configPath)) return false
+  unlinkSync(configPath)
+  return true
 }
 
 /**

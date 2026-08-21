@@ -9,6 +9,7 @@ vi.mock('../examples/notify-feishu.mjs', () => ({
 }))
 
 import {
+  deleteFeishuConfig,
   FEISHU_RESULT_MAX_CHARS_DEFAULT,
   readFeishuSummary,
   runFeishuSetup,
@@ -51,6 +52,22 @@ describe('readFeishuSummary.resultMaxChars', () => {
     const file = join(tmp, 'feishu-config.json')
     writeFileSync(file, JSON.stringify({ ...credentials, result_max_chars: 'wide' }), 'utf8')
     expect(readFeishuSummary(file).resultMaxChars).toBe(300)
+  })
+
+  it('includes a preview truncated at the stored length', () => {
+    const file = join(tmp, 'feishu-config.json')
+    writeFileSync(file, JSON.stringify({ ...credentials, result_max_chars: 120 }), 'utf8')
+    const summary = readFeishuSummary(file)
+    expect(summary.preview.length).toBeGreaterThan(100)
+    expect(summary.preview.length).toBeLessThanOrEqual(121)
+  })
+
+  it('deletes the credential file on disconnect', () => {
+    const file = join(tmp, 'feishu-config.json')
+    writeFileSync(file, JSON.stringify(credentials), 'utf8')
+    expect(deleteFeishuConfig(file)).toBe(true)
+    expect(existsSync(file)).toBe(false)
+    expect(deleteFeishuConfig(file)).toBe(false)
   })
 })
 

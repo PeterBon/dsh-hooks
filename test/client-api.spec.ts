@@ -8,8 +8,11 @@ import {
   outcomeTone,
   postFeishuCancel,
   postFeishuConfig,
+  postFeishuDisconnect,
   postFeishuSetup,
   postFeishuTest,
+  postHooksSave,
+  postNotifyTest,
   postTest,
 } from '../src/client/api.ts'
 
@@ -175,5 +178,53 @@ describe('Feishu API client', () => {
     } finally {
       warn.mockRestore()
     }
+  })
+})
+
+describe('hook editor / notify test / disconnect API', () => {
+  it('sends a notify-channel test and returns the preview', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: true, value: { message: '✅ 测试通知已发送', preview: '💬 新消息' } }),
+    )
+    const result = await postNotifyTest('webhook', 'https://x.test', true, fetchFn as unknown as typeof fetch)
+    expect(result).toMatchObject({ ok: true, message: '✅ 测试通知已发送', preview: '💬 新消息' })
+    const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ channel: 'webhook', url: 'https://x.test', slack: true })
+  })
+
+  it('omits empty url and slack=false from the notify test body', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, value: {} }))
+    await postNotifyTest('desktop', '', false, fetchFn as unknown as typeof fetch)
+    const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ channel: 'desktop' })
+  })
+
+  it('saves hooks for a profile', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: true, value: { hookCount: 3, patchFile: 'p.yml', backupPath: 'p.yml.bak', message: 'saved' } }),
+    )
+    const hooks = [{ on: 'turn/end', when: 'completed', run: 'node x.mjs' }]
+    const result = await postHooksSave('work', hooks, fetchFn as unknown as typeof fetch)
+    expect(result).toMatchObject({ ok: true, hookCount: 3, patchFile: 'p.yml' })
+    const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ profile: 'work', hooks })
+  })
+
+  it('surfaces editor save errors', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: false, error: { code: 'save-failed', message: 'hook #1：无效事件 nope' } }, false, 400),
+    )
+    const result = await postHooksSave('web', [{ on: 'nope', run: 'x' }], fetchFn as unknown as typeof fetch)
+    expect(result).toEqual({ ok: false, error: 'hook #1：无效事件 nope' })
+  })
+
+  it('disconnects Feishu with hook removal', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: true, value: { disconnected: true, existed: true, removedHooks: true, message: 'ok' } }),
+    )
+    const result = await postFeishuDisconnect('web', true, fetchFn as unknown as typeof fetch)
+    expect(result).toMatchObject({ ok: true, disconnected: true, removedHooks: true })
+    const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ profile: 'web', removeHooks: true })
   })
 })

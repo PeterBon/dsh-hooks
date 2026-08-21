@@ -55,7 +55,7 @@ export function apply(ctx: Context, config: Config = {}) {
     const feishu = createFeishuSetupManager()
     ctx.effect(
       () => {
-        const unregister = registerHookRoutes(webServer, { hooks, history, feishu: { manager: feishu } })
+        const unregister = registerHookRoutes(webServer, { hooks, history, runner, feishu: { manager: feishu } })
         return () => {
           unregister()
           // Abort an in-flight QR scan so it never outlives the plugin.
