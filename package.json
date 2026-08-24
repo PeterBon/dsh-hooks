@@ -86,7 +86,7 @@
     "react-dom": "^18.3.1",
     "tsdown": "^0.22.2",
     "typescript": "^7.0.2",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.73.0",
