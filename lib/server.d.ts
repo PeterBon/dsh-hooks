@@ -5,7 +5,7 @@
  * to the profile's cordis.patch.yml with a backup), and the Feishu connect
  * flow (QR setup / cancel / config / test card / disconnect). Registered
  * only when the shared webserver service exists (web profile) — CLI/headless
- * environments never see them. Loopback-only with JSON envelopes; POSTs
+ * environments never see them. Loopback-only by default, with JSON envelopes; POSTs
  * require an explicit application/json content-type (CSRF hardening, same
  * posture as dsh-aionui-panel).
  */
@@ -25,7 +25,7 @@ export interface WebServerLike {
 }
 /** Plugin version, read from package.json (this package ships its own). */
 export declare function pluginVersion(): string;
-/** Loopback fence: never let a LAN client reach /dsh-hooks operations. */
+/** DSH_HOOKS_ALLOWED_IPS: unset/empty = loopback; * = any; otherwise comma-separated IPs. */
 export declare function isLoopbackRequest(req: IncomingMessage): boolean;
 export interface FeishuRouteDeps {
     /** QR-scan session manager (one in-flight flow at a time). */

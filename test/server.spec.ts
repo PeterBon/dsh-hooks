@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createHistorySink } from '../src/history.js'
-import { createHookHandler } from '../src/server.js'
+import { createHookHandler, isLoopbackRequest } from '../src/server.js'
 import type { HookSpec } from '../src/config.js'
 import type { FeishuSetupManager } from '../src/feishu-session.js'
 import { FEISHU_SETUP_BUSY } from '../src/feishu-session.js'
@@ -62,6 +62,35 @@ const hooks = [
   { on: 'turn/end', when: 'completed', run: 'echo hi' },
   { on: 'tool/call', run: 'echo x' },
 ] as HookSpec[]
+
+describe('isLoopbackRequest environment config', () => {
+  it.each([
+    [undefined, '127.0.0.1', true],
+    ['', '::1', true],
+    ['  ', '::ffff:127.0.0.1', true],
+    ['local', '127.0.0.1', false],
+    [undefined, '192.168.1.5', false],
+    ['', '192.168.1.5', false],
+    ['local', '192.168.1.5', false],
+    ['*', '192.168.1.5', true],
+    ['192.168.1.5, 10.0.0.2', '10.0.0.2', true],
+    ['192.168.1.5', '::ffff:192.168.1.5', true],
+    ['::ffff:192.168.1.5', '192.168.1.5', true],
+    ['2001:DB8::1', '2001:db8::1', true],
+    ['192.168.1.5', '192.168.1.6', false],
+    ['192.168.1.5', '127.0.0.1', false],
+    ['typo', '192.168.1.5', false],
+    [',', undefined, false],
+  ] as const)('config %s, peer %s => %s', (config, address, expected) => {
+    vi.stubEnv('DSH_HOOKS_ALLOWED_IPS', config)
+    try {
+      const req = fakeReq({ socket: { remoteAddress: address }, headers: { 'x-forwarded-for': '127.0.0.1' } })
+      expect(isLoopbackRequest(req)).toBe(expected)
+    } finally {
+      vi.unstubAllEnvs()
+    }
+  })
+})
 
 describe('createHookHandler', () => {
   it('serves /dsh-hooks/status', async () => {

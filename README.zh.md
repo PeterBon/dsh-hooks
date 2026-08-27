@@ -171,7 +171,7 @@ CLI/headless 环境完全不受影响：浏览器半只在 web 加载，核心�
 
 ## Web profile HTTP 路由
 
-web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 loopback-only 的 `/dsh-hooks/*` 路由——CLI/headless 环境完全无感：
+web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 `/dsh-hooks/*` 路由，默认仅允许本地回环地址，可通过下述环境变量调整——CLI/headless 环境完全无感：
 
 | 路由 | 方法 | 用途 |
 | --- | --- | --- |
@@ -187,7 +187,77 @@ web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 loop
 | `/dsh-hooks/feishu/test` | POST | 用已存凭据发送测试卡片 |
 | `/dsh-hooks/feishu/disconnect` | POST | 断开连接：删除凭据文件，`removeHooks: true` 时一并移除 patch 中引用 notify-feishu.mjs 的 hooks（带备份） |
 
-安全约定与 dsh-aionui-panel 一致：仅回环地址可达、POST 必须 `application/json`（防跨站表单 CSRF）。同时 web profile 下会向 agent 注入一段 systemPrompt 公告，说明插件存在与协作方式。
+所有访问模式下，POST 仍必须使用 `application/json`（防跨站表单 CSRF）。同时 web profile 下会向 agent 注入一段 systemPrompt 公告，说明插件存在与协作方式。
+
+### 配置 HTTP 来源 IP 限制
+
+在**运行 `dsh web` 的进程环境**中设置 `DSH_HOOKS_ALLOWED_IPS`。这不是 `cordis.patch.yml` 的配置字段，不需要修改 hooks 配置。
+
+| 环境变量值 | 行为 |
+| --- | --- |
+| 未设置、空字符串或只有空白 | 仅允许 `127.0.0.1`、`::1`、`::ffff:127.0.0.1`，保持默认行为 |
+| `*` | 不限制来源 IP |
+| `192.168.1.100,10.0.0.2` | 只允许逗号分隔列表中的 IP |
+
+变量值首尾空白会被去除。`local`、`all` 不是特殊值；除空值和单独的 `*` 外，其他值都作为 IP 列表匹配。白名单模式**不会额外放行本地连接**，如需保留本地访问，请显式加入 `127.0.0.1,::1`。
+
+匹配时会忽略每项首尾空白、字母大小写及 `::ffff:` 前缀，例如 `192.168.1.100` 可以匹配 `::ffff:192.168.1.100`。不支持域名、端口、CIDR 网段或列表内通配符；无效条目不会自动回退到仅本地或不限制模式。IPv6 采用上述规则处理后的字符串比较，不会统一展开/压缩写法，请使用与服务端所见地址一致的写法。
+
+#### 直接启动
+
+PowerShell：选择一种设置，在**同一终端**启动服务。
+
+```powershell
+# 仅本地（不设置该变量也可以）
+$env:DSH_HOOKS_ALLOWED_IPS = ''
+
+# 或：允许指定客户端，并保留本地访问
+# $env:DSH_HOOKS_ALLOWED_IPS = '192.168.1.100,127.0.0.1,::1'
+
+# 或：不限制来源 IP（请先确保外部访问控制可靠）
+# $env:DSH_HOOKS_ALLOWED_IPS = '*'
+
+dsh web
+```
+
+Linux/macOS shell：以下命令三选一。
+
+```sh
+DSH_HOOKS_ALLOWED_IPS='' dsh web
+DSH_HOOKS_ALLOWED_IPS='192.168.1.100,127.0.0.1,::1' dsh web
+DSH_HOOKS_ALLOWED_IPS='*' dsh web
+```
+
+修改终端或服务管理器中的环境变量后，需要重新启动对应的 `dsh web` 进程；已运行的进程不会自动继承新值。单独把变量写入 `.env` 不代表已经传入进程，需要由启动器或容器配置明确加载。
+
+#### Docker Compose
+
+将变量加入**实际运行 DSH 的服务**的 `environment`，保留原有镜像、端口、卷等配置。以下 `dsh` 为示例服务名，请替换成自己的服务名：
+
+```yaml
+services:
+  dsh:
+    environment:
+      DSH_HOOKS_ALLOWED_IPS: "192.168.1.100,127.0.0.1,::1"
+      # 仅本地用 ""；不限制用 "*"（星号必须加引号）
+```
+
+修改后重新创建该服务的容器以应用新环境变量，例如 `docker compose up -d --force-recreate dsh`；仅重启已有容器不会更新容器环境配置。若使用 Compose 的 `.env` 文件，也需要在服务中通过 `environment` 引用变量或通过 `env_file` 传入。
+
+#### 代理、安全与验证
+
+- 检查的是 `req.socket.remoteAddress`，不读取 `X-Forwarded-For`、`X-Real-IP` 或 `Forwarded`。Docker/NAT/反向代理下，该地址可能是网关或代理 IP，而不是浏览器所在机器的 IP。
+- 放行代理 IP 会放行经该代理转发的所有客户端；本机代理也可能将外部请求转发为回环连接。因此，代理后的客户端限制应在代理层执行。“仅本地”指服务端（或容器内）的回环连接，不等于只允许本机浏览器。
+- `*` 会放开读取历史、修改配置、执行 hook 等敏感接口的来源 IP 限制；IP 白名单不是身份认证，请用可信网络或外部认证保护这些接口，不要直接暴露到不可信网络。
+- 此变量只影响 `/dsh-hooks/*`，不会改变服务监听地址、端口、防火墙规则或其他插件的权限。
+
+可从允许及不允许的客户端分别请求 `GET /dsh-hooks/status`（主机和端口替换为实际地址）。通过本插件的检查时返回正常状态 JSON；被本插件拒绝时返回 HTTP 403：
+
+```json
+{"ok":false,"error":{"code":"forbidden","message":"IP not allowed"}}
+```
+
+若白名单配置后仍收到该错误，先确认变量已传入实际服务进程，再检查服务端看到的是客户端 IP 还是代理/网关 IP。若连接超时或被拒绝连接，则还需检查监听地址、端口映射和网络规则。
 
 ## 通用 webhook 示例
 
