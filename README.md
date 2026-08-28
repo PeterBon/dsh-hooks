@@ -189,7 +189,7 @@ CLI/headless environments are unaffected: the browser half loads only in the web
 
 ## Web profile HTTP routes
 
-In the web profile (when the shared webServer service exists) dsh-hooks registers loopback-only `/dsh-hooks/*` routes — CLI/headless environments never see them:
+In the web profile (when the shared webServer service exists) dsh-hooks registers `/dsh-hooks/*` routes, restricted to loopback by default and configurable through the environment variable below — CLI/headless environments never see them:
 
 | Route | Method | Purpose |
 | --- | --- | --- |
@@ -205,7 +205,77 @@ In the web profile (when the shared webServer service exists) dsh-hooks register
 | `/dsh-hooks/feishu/test` | POST | send a test card with the stored credentials |
 | `/dsh-hooks/feishu/disconnect` | POST | disconnect: delete the credential file; `removeHooks: true` also drops the hooks referencing notify-feishu.mjs (with a backup) |
 
-Security matches dsh-aionui-panel: loopback-only, POSTs require `application/json` (blocks cross-site form CSRF). The web profile also gets a systemPrompt section announcing the plugin to agents.
+POSTs require `application/json` in every access mode (blocks cross-site form CSRF). The web profile also gets a systemPrompt section announcing the plugin to agents.
+
+### Configure HTTP source IP access
+
+Set `DSH_HOOKS_ALLOWED_IPS` in the **environment of the process running `dsh web`**. This is not a `cordis.patch.yml` field and does not require changing your hooks configuration.
+
+| Environment variable value | Behavior |
+| --- | --- |
+| Unset, empty, or whitespace-only | Allows only `127.0.0.1`, `::1`, and `::ffff:127.0.0.1`, preserving the default behavior |
+| `*` | Disables source IP filtering |
+| `192.168.1.100,10.0.0.2` | Allows only IPs in the comma-separated list |
+
+Leading and trailing whitespace is removed. `local` and `all` are not special values: anything other than a blank value or a standalone `*` is matched as an IP list. Allowlist mode **does not implicitly allow loopback connections**; include `127.0.0.1,::1` explicitly if you need local access.
+
+Matching ignores surrounding whitespace, letter case, and the `::ffff:` prefix on each address, so `192.168.1.100` matches `::ffff:192.168.1.100`. Hostnames, ports, CIDR ranges, and wildcards within a list are not supported. Invalid entries do not trigger a fallback to loopback-only or unrestricted access. IPv6 matching compares strings after this normalization, without expanding or compressing IPv6 notation; use the representation observed by the server.
+
+#### Direct startup
+
+PowerShell: choose one setting and start the service in the **same terminal**.
+
+```powershell
+# Loopback only (leaving the variable unset also works)
+$env:DSH_HOOKS_ALLOWED_IPS = ''
+
+# Alternatively: allow a client and retain local access
+# $env:DSH_HOOKS_ALLOWED_IPS = '192.168.1.100,127.0.0.1,::1'
+
+# Alternatively: allow any source IP (secure external access first)
+# $env:DSH_HOOKS_ALLOWED_IPS = '*'
+
+dsh web
+```
+
+Linux/macOS shell: choose one of these commands.
+
+```sh
+DSH_HOOKS_ALLOWED_IPS='' dsh web
+DSH_HOOKS_ALLOWED_IPS='192.168.1.100,127.0.0.1,::1' dsh web
+DSH_HOOKS_ALLOWED_IPS='*' dsh web
+```
+
+Restart the corresponding `dsh web` process after changing its terminal or service-manager environment; a running process does not inherit subsequent changes. Writing the variable to `.env` alone does not pass it to the process; your launcher or container configuration must load it explicitly.
+
+#### Docker Compose
+
+Add the variable to `environment` on the **service running DSH**, preserving its existing image, ports, volumes, and other settings. Replace the example service name `dsh` with your actual service name:
+
+```yaml
+services:
+  dsh:
+    environment:
+      DSH_HOOKS_ALLOWED_IPS: "192.168.1.100,127.0.0.1,::1"
+      # Use "" for loopback only or "*" for unrestricted IPs (quote the asterisk).
+```
+
+Recreate the service container to apply the new environment, for example with `docker compose up -d --force-recreate dsh`. Restarting an existing container alone does not update its environment configuration. If using a Compose `.env` file, also reference the variable through the service's `environment` or pass it through `env_file`.
+
+#### Proxies, security, and verification
+
+- The check uses `req.socket.remoteAddress`, ignoring `X-Forwarded-For`, `X-Real-IP`, and `Forwarded`. Behind Docker/NAT/reverse proxies, this may be a gateway or proxy IP instead of the browser machine's IP.
+- Allowlisting a proxy IP allows all clients forwarded by that proxy. A local proxy can also forward external requests as loopback connections. Enforce client restrictions at the proxy. Loopback-only refers to the server's (or container's) loopback connections, not exclusively to browsers on that machine.
+- `*` removes the source IP restriction from sensitive operations including history access, configuration changes, and hook execution. An IP allowlist is not authentication: protect these endpoints with a trusted network or external authentication, and do not expose them directly to untrusted networks.
+- This variable affects only `/dsh-hooks/*`; it does not change listen addresses, ports, firewall rules, or other plugins' permissions.
+
+Request `GET /dsh-hooks/status` from both allowed and denied clients using your actual host and port. Requests passing this plugin's check receive the normal status JSON; requests rejected by this plugin receive HTTP 403:
+
+```json
+{"ok":false,"error":{"code":"forbidden","message":"IP not allowed"}}
+```
+
+If an allowlisted client still receives this error, confirm the variable reached the actual service process, then check whether the server sees the client IP or a proxy/gateway IP. For connection timeouts or refused connections, also check listen addresses, port mappings, and network rules.
 
 ## Feishu notification example
 

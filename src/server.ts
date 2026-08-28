@@ -5,7 +5,7 @@
  * to the profile's cordis.patch.yml with a backup), and the Feishu connect
  * flow (QR setup / cancel / config / test card / disconnect). Registered
  * only when the shared webserver service exists (web profile) — CLI/headless
- * environments never see them. Loopback-only with JSON envelopes; POSTs
+ * environments never see them. Loopback-only by default, with JSON envelopes; POSTs
  * require an explicit application/json content-type (CSRF hardening, same
  * posture as dsh-aionui-panel).
  */
@@ -55,9 +55,16 @@ function json(res: ServerResponse, envelope: Envelope<unknown>, status = 200): v
   res.end(JSON.stringify(envelope))
 }
 
-/** Loopback fence: never let a LAN client reach /dsh-hooks operations. */
+/** DSH_HOOKS_ALLOWED_IPS: unset/empty = loopback; * = any; otherwise comma-separated IPs. */
 export function isLoopbackRequest(req: IncomingMessage): boolean {
+  const allowedIps = process.env.DSH_HOOKS_ALLOWED_IPS?.trim() ?? ''
+  if (allowedIps === '*') return true
+  // Check the direct peer only; never trust forwarded headers.
   const address = req.socket.remoteAddress ?? ''
+  if (allowedIps !== '') {
+    const normalize = (ip: string) => ip.trim().toLowerCase().replace(/^::ffff:/, '')
+    return address !== '' && allowedIps.split(',').some((ip) => normalize(ip) === normalize(address))
+  }
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
 }
 
@@ -135,7 +142,7 @@ export function createHookHandler(options: HookRoutesOptions) {
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (!isLoopbackRequest(req)) {
-      json(res, FAIL('forbidden', 'loopback-only'), 403)
+      json(res, FAIL('forbidden', 'IP not allowed'), 403)
       return
     }
     const url = new URL(req.url ?? '/', 'http://x')
