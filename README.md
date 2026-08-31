@@ -119,6 +119,7 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | aggregated cache-read tokens, when reported |
 | `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | aggregated cache-write tokens, when reported |
 | `DSH_HOOK_USAGE_REASONING_TOKENS` | aggregated reasoning tokens, when reported |
+| `DSH_HOOK_RUNNING_SUBAGENTS` | live subagents still running under this session (turn/end; `0` = none — lets a hook tell "work handed off to background subagents" apart from "the turn finished for real") |
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.

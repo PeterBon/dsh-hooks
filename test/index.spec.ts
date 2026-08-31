@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import { apply, DSH_HOOKS_GUIDANCE } from '../src/index.js'
+import { apply, countRunningSubagents, DSH_HOOKS_GUIDANCE } from '../src/index.js'
 
 /** Minimal cordis Context fake: get/on/effect only, services injected. */
 function fakeCtx(services: Record<string, unknown> = {}) {
@@ -64,5 +64,47 @@ describe('apply soft-dependency wiring', () => {
     const { ctx, effectLabels } = fakeCtx()
     apply(ctx, { hooks: [] })
     expect(effectLabels.filter((l) => l.includes('routes') || l.includes('prompt'))).toEqual([])
+  })
+})
+
+describe('countRunningSubagents', () => {
+  const mk = (id: string, status = 'idle') => ({ id, status })
+  const parent = mk('session-main')
+  const runningChild = mk('sub-1', 'running')
+  const idleChild = mk('sub-2')
+  const runningGrandchild = mk('sub-2a', 'running')
+  const otherRoot = mk('session-other', 'running')
+
+  const agents = {
+    get: (id: string) =>
+      ({ 'session-main': parent, 'sub-1': runningChild, 'sub-2': idleChild, 'sub-2a': runningGrandchild, 'session-other': otherRoot })[id],
+    list: () => [parent, runningChild, idleChild, runningGrandchild, otherRoot],
+    isOwnedBy: () => false,
+  }
+  const descendants = (rows: Array<{ id: string }>) => ({ listDescendants: async () => rows })
+
+  it('counts running descendants from the durable session tree', async () => {
+    await expect(countRunningSubagents(agents, descendants([{ id: 'sub-1' }]), 'session-main')).resolves.toBe(1)
+  })
+
+  it('does not count settled or idle children', async () => {
+    await expect(countRunningSubagents(agents, descendants([{ id: 'sub-2' }]), 'session-main')).resolves.toBe(0)
+  })
+
+  it('counts running grandchildren below an idle child', async () => {
+    await expect(countRunningSubagents(agents, descendants([{ id: 'sub-2' }, { id: 'sub-2a' }]), 'session-main')).resolves.toBe(1)
+  })
+
+  it('excludes other sessions entirely', async () => {
+    await expect(countRunningSubagents(agents, descendants([]), 'session-other')).resolves.toBe(0)
+  })
+
+  it('returns 0 for an unknown session', async () => {
+    await expect(countRunningSubagents(agents, descendants([{ id: 'sub-1' }]), 'nope')).resolves.toBe(0)
+  })
+
+  it('falls back to the live-registry scan when listing throws', async () => {
+    const broken = { listDescendants: async () => { throw new Error('boom') } }
+    await expect(countRunningSubagents(agents, broken, 'session-main')).resolves.toBe(0)
   })
 })

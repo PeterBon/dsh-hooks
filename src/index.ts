@@ -27,6 +27,61 @@ import { registerHookRoutes, type WebServerLike } from './server.js'
 
 export const name = 'dsh-hooks'
 
+/** Minimal structural contract of the optional `agents` service. */
+interface AgentsLike {
+  get(id: string): { id: string; status: string } | undefined
+  list(): Array<{ id: string; status: string }>
+  isOwnedBy(id: string, owner: { id: string }): boolean
+}
+
+/** Minimal structural contract of the optional `subagents` service. */
+interface SubagentsLike {
+  listDescendants(rootSessionId: string): Promise<Array<{ id?: string }>>
+}
+
+/**
+ * Count live agents still running in one session's descendant subagent tree.
+ *
+ * Lineage comes from the durable session tree (`subagents.listDescendants`,
+ * driven by the session header `parentSession`): a subagent's runtime owner
+ * in the agents registry is the subagent manager's host-level scope, not the
+ * parent agent, so ownership chains (`agents.isOwnedBy`) cannot find children.
+ * Only agents whose live status is `running` count — a settled/idle
+ * continuable child no longer suppresses the turn/end notification. Returns 0
+ * when the session has no live agent or the services are unavailable.
+ */
+export async function countRunningSubagents(
+  agents: AgentsLike,
+  subagents: SubagentsLike | undefined,
+  sessionId: string | undefined,
+): Promise<number> {
+  if (sessionId === undefined || agents.get(sessionId) === undefined) return 0
+  let ids: string[] = []
+  if (subagents !== undefined) {
+    try {
+      ids = (await subagents.listDescendants(sessionId))
+        .map((row) => row.id)
+        .filter((id): id is string => typeof id === 'string' && id !== sessionId)
+    } catch {
+      // listing unavailable — fall back to the live-registry child scan below
+    }
+  }
+  if (ids.length === 0) {
+    const owner = agents.get(sessionId)
+    if (owner === undefined) return 0
+    ids = agents
+      .list()
+      .filter((candidate) => candidate !== owner && agents.isOwnedBy(candidate.id, owner))
+      .map((candidate) => candidate.id)
+  }
+  let count = 0
+  for (const id of ids) {
+    const agent = agents.get(id)
+    if (agent !== undefined && agent.status === 'running') count++
+  }
+  return count
+}
+
 // Dependency on the session service: `session/event` only exists once a
 // SessionStore is composed, and this plugin consumes the durable firehose.
 export const inject = ['sessions'] as const
@@ -91,13 +146,36 @@ export function apply(ctx: Context, config: Config = {}) {
     }
   }
 
+  // turn/end: fill the live running-subagent count before dispatching hooks,
+  // so a hook can tell "work handed off to still-running subagents" apart from
+  // "the turn finished for real". The services are read lazily at event time —
+  // at plugin apply time the agents/subagents rows may not be composed yet.
+  const matchAfterSubagentCount = async (ctxValue: HookContext, reasonKind?: TurnEndReasonKind): Promise<void> => {
+    const agents = ctx.get('agents', false) as AgentsLike | undefined
+    if (agents === undefined) {
+      ctx.logger?.warn?.('[dsh-hooks] agents service unavailable at turn/end — runningSubagents stays 0')
+    } else {
+      const subagents = ctx.get('subagents', false) as SubagentsLike | undefined
+      try {
+        ctxValue.runningSubagents = await countRunningSubagents(agents, subagents, ctxValue.sessionId)
+      } catch (error) {
+        ctx.logger?.warn?.('[dsh-hooks] failed to count running subagents: %s', String(error))
+      }
+    }
+    runMatching(ctxValue, reasonKind)
+  }
+
   // Durable session firehose: turn boundaries, steps, tool calls, messages,
   // titles, and approval requests.
   ctx.on('session/event', (session: Session, event: unknown) => {
     const classified = classifySessionEvent(session, event as never)
     if (classified === undefined) return
     const reasonKind = extractReasonKind(event)
-    runMatching(classified, reasonKind)
+    if (classified.event !== 'turn/end') {
+      runMatching(classified, reasonKind)
+      return
+    }
+    void matchAfterSubagentCount(classified, reasonKind)
   })
 
   // Session lifecycle (published by the session store, not the firehose).
@@ -135,6 +213,6 @@ function extractReasonKind(event: unknown): TurnEndReasonKind | undefined {
   return typeof e.data?.reason?.kind === 'string' ? (e.data.reason.kind as TurnEndReasonKind) : undefined
 }
 
-// Referenced only for tree-shaking clarity of the module contract; clearTurnTracking
-// is exported for tests that need deterministic duration bookkeeping.
-export const _internals = { clearTurnTracking }
+// Referenced only for tree-shaking clarity of the module contract; exported
+// for tests that need deterministic bookkeeping.
+export const _internals = { clearTurnTracking, countRunningSubagents }
