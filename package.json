@@ -1,6 +1,6 @@
 {
   "name": "dsh-hooks",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "packageManager": "pnpm@11.21.0",
   "description": "Config-driven lifecycle hooks plugin for DeepSeek Harness: declare event -> command hooks in cordis.patch.yml, no plugin code required. Includes a Hooks section in the Web GUI settings (history timeline + manual tester + notify tests + hook editor + Feishu connect).",
   "author": "PeterBon",
