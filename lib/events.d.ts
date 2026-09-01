@@ -9,6 +9,11 @@ export interface ApprovalAskedData {
     callId?: string;
     reason?: string;
 }
+/** `approval/decided` payload (merge-extensible, declared by dsh-user-approval). */
+export interface ApprovalDecidedData {
+    id: string;
+    outcome: string;
+}
 /** `session/title` payload (merge-extensible, declared by dsh-session-title). */
 export interface SessionTitleEventData {
     title: string;
@@ -25,6 +30,7 @@ export interface SessionTitleEventData {
 declare module '@deepseek-ai/dsh-session/types' {
     interface SessionEventMap {
         'approval/asked': ApprovalAskedData;
+        'approval/decided': ApprovalDecidedData;
         'session/title': SessionTitleEventData;
     }
 }
@@ -106,6 +112,7 @@ export declare function titleContext(session: Session, title: unknown, source: u
 export declare function sessionCreatedContext(session: Session): HookContext;
 export declare function sessionDisposedContext(session: Session): HookContext;
 export declare function approvalContext(session: Session, data: ApprovalAskedData): HookContext;
+export declare function approvalDecidedContext(session: Session, data: ApprovalDecidedData): HookContext;
 export declare function agentCreatedContext(agent: AgentLike): HookContext;
 export declare function agentDisposedContext(agent: AgentLike): HookContext;
 export declare function agentErrorContext(agent: AgentLike, turn: number | undefined, error: unknown): HookContext;

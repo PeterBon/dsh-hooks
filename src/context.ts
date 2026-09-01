@@ -43,6 +43,20 @@ export interface HookContext {
    * from the agents/subagents services when they are available.
    */
   runningSubagents?: number
+  /** Subagent lineage: the parent session id (session header `parentSession`). */
+  parentSessionId?: string
+  /** Whether the session was created as a subagent child (header `origin`). */
+  subagent?: boolean
+  /** Delegation depth from the session header; 0 = top-level session. */
+  delegationDepth?: number
+  /** Session creation time, epoch ms (session header `createdAt`). */
+  sessionCreatedAt?: number
+  /** Agent preset id that composed the session's agent (header `agentPreset`). */
+  agentPreset?: string
+  /** Approval audit id, pairing `approval/asked` with `approval/decided`. */
+  approvalId?: string
+  /** Approval decision outcome (approval/decided). */
+  approvalOutcome?: string
   timestamp: string
 }
 
@@ -69,6 +83,13 @@ export function toEnv(ctx: HookContext): Record<string, string> {
   if (ctx.usageCacheWriteTokens !== undefined) env.DSH_HOOK_USAGE_CACHE_WRITE_TOKENS = String(ctx.usageCacheWriteTokens)
   if (ctx.usageReasoningTokens !== undefined) env.DSH_HOOK_USAGE_REASONING_TOKENS = String(ctx.usageReasoningTokens)
   if (ctx.runningSubagents !== undefined) env.DSH_HOOK_RUNNING_SUBAGENTS = String(ctx.runningSubagents)
+  if (ctx.parentSessionId !== undefined) env.DSH_HOOK_PARENT_SESSION_ID = ctx.parentSessionId
+  if (ctx.subagent !== undefined) env.DSH_HOOK_SUBAGENT = ctx.subagent ? '1' : '0'
+  if (ctx.delegationDepth !== undefined) env.DSH_HOOK_DELEGATION_DEPTH = String(ctx.delegationDepth)
+  if (ctx.sessionCreatedAt !== undefined) env.DSH_HOOK_SESSION_CREATED_AT = String(ctx.sessionCreatedAt)
+  if (ctx.agentPreset !== undefined) env.DSH_HOOK_AGENT_PRESET = ctx.agentPreset
+  if (ctx.approvalId !== undefined) env.DSH_HOOK_APPROVAL_ID = ctx.approvalId
+  if (ctx.approvalOutcome !== undefined) env.DSH_HOOK_APPROVAL_OUTCOME = ctx.approvalOutcome
   return env
 }
 

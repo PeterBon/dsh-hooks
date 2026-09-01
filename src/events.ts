@@ -11,6 +11,12 @@ export interface ApprovalAskedData {
   reason?: string
 }
 
+/** `approval/decided` payload (merge-extensible, declared by dsh-user-approval). */
+export interface ApprovalDecidedData {
+  id: string
+  outcome: string
+}
+
 /** `session/title` payload (merge-extensible, declared by dsh-session-title). */
 export interface SessionTitleEventData {
   title: string
@@ -21,6 +27,7 @@ export interface SessionTitleEventData {
 declare module '@deepseek-ai/dsh-session/types' {
   interface SessionEventMap {
     'approval/asked': ApprovalAskedData
+    'approval/decided': ApprovalDecidedData
     'session/title': SessionTitleEventData
   }
 }
@@ -52,12 +59,19 @@ const turnStarts = new Map<string, number>()
 /** Tool name for an in-flight call, remembered at `tool/call` and consumed at `tool/result`. */
 const callTools = new Map<string, string>()
 
+/** Approval identity remembered at `approval/asked` and consumed at `approval/decided`. */
+const approvalTools = new Map<string, { toolName: string; callId?: string }>()
+
 function sessionKey(session: Session): string {
   return String(session.id)
 }
 
 function callKey(session: Session, callId: unknown): string {
   return `${sessionKey(session)}\u0000${String(callId)}`
+}
+
+function approvalKey(session: Session, id: unknown): string {
+  return `${sessionKey(session)}\u0000${String(id)}`
 }
 
 /** Best-effort access to a session's event log (test fakes may omit it). */
@@ -215,12 +229,31 @@ export function matchFilters(match: Record<string, RegExp> | undefined, ctx: Hoo
   return true
 }
 
+/**
+ * Session-header lineage/metadata shared by every session-backed context:
+ * subagent parentage, delegation depth, creation time, and agent preset.
+ */
+function sessionMeta(session: Session): Pick<
+  HookContext,
+  'parentSessionId' | 'subagent' | 'delegationDepth' | 'sessionCreatedAt' | 'agentPreset'
+> {
+  const header = session.header
+  return {
+    parentSessionId: header.parentSession,
+    subagent: header.origin === 'subagent',
+    delegationDepth: header.delegationDepth ?? 0,
+    sessionCreatedAt: header.createdAt,
+    agentPreset: header.agentPreset,
+  }
+}
+
 function baseContext(session: Session, event: string): HookContext {
   return {
     event,
     sessionId: sessionKey(session),
     sessionName: sessionTitle(session),
     cwd: session.header.cwd,
+    ...sessionMeta(session),
     timestamp: new Date().toISOString(),
   }
 }
@@ -338,6 +371,7 @@ export function sessionCreatedContext(session: Session): HookContext {
     sessionId: sessionKey(session),
     sessionName: sessionTitle(session),
     cwd: session.header.cwd,
+    ...sessionMeta(session),
     timestamp: new Date().toISOString(),
   }
 }
@@ -348,16 +382,32 @@ export function sessionDisposedContext(session: Session): HookContext {
     sessionId: sessionKey(session),
     sessionName: sessionTitle(session),
     cwd: session.header.cwd,
+    ...sessionMeta(session),
     timestamp: new Date().toISOString(),
   }
 }
 
 export function approvalContext(session: Session, data: ApprovalAskedData): HookContext {
+  approvalTools.set(approvalKey(session, data.id), { toolName: data.toolName, callId: data.callId })
   return {
     ...baseContext(session, 'approval/asked'),
+    approvalId: data.id,
     tool: data.toolName,
     callId: data.callId,
     reason: data.reason,
+  }
+}
+
+export function approvalDecidedContext(session: Session, data: ApprovalDecidedData): HookContext {
+  const key = approvalKey(session, data.id)
+  const paired = approvalTools.get(key)
+  if (paired !== undefined) approvalTools.delete(key)
+  return {
+    ...baseContext(session, 'approval/decided'),
+    approvalId: data.id,
+    approvalOutcome: data.outcome,
+    tool: paired?.toolName,
+    callId: paired?.callId,
   }
 }
 
@@ -434,6 +484,8 @@ export function classifySessionEvent(session: Session, event: SessionEvent): Hoo
       return userMessageContext(session, event.data.content, event.data.source)
     case 'approval/asked':
       return approvalContext(session, event.data)
+    case 'approval/decided':
+      return approvalDecidedContext(session, event.data)
     case 'session/title':
       return titleContext(session, event.data.title, event.data.source)
     default:

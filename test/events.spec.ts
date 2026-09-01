@@ -227,11 +227,96 @@ describe('classifySessionEvent', () => {
       fakeSession('s1'),
       sessionEvent('approval/asked', { id: 'a1', toolName: 'pwsh', callId: 'c1', reason: 'unsafe' }),
     )
-    expect(ctx).toMatchObject({ event: 'approval/asked', sessionId: 's1', tool: 'pwsh', callId: 'c1' })
+    expect(ctx).toMatchObject({
+      event: 'approval/asked',
+      sessionId: 's1',
+      approvalId: 'a1',
+      tool: 'pwsh',
+      callId: 'c1',
+    })
   })
 
   it('returns undefined for unrelated events', () => {
     expect(classifySessionEvent(fakeSession(), sessionEvent('todo/write', { todos: [] }))).toBeUndefined()
+  })
+})
+
+describe('session lineage metadata', () => {
+  function lineageSession() {
+    return {
+      id: 'sub-1',
+      header: {
+        cwd: 'D:\\work\\demo',
+        createdAt: 1750000000000,
+        parentSession: 'parent-9',
+        origin: 'subagent',
+        delegationDepth: 1,
+        agentPreset: 'liangshen',
+      },
+      events: [],
+    } as never
+  }
+
+  it('carries lineage and metadata from the session header', () => {
+    const ctx = classifySessionEvent(lineageSession(), sessionEvent('turn/start', { turn: 1 }))
+    expect(ctx).toMatchObject({
+      event: 'turn/start',
+      parentSessionId: 'parent-9',
+      subagent: true,
+      delegationDepth: 1,
+      sessionCreatedAt: 1750000000000,
+      agentPreset: 'liangshen',
+    })
+  })
+
+  it('defaults top-level sessions to subagent=false and depth 0', () => {
+    const ctx = classifySessionEvent(fakeSession('top'), sessionEvent('turn/start', { turn: 1 }))
+    expect(ctx).toMatchObject({ subagent: false, delegationDepth: 0 })
+    expect(ctx?.parentSessionId).toBeUndefined()
+    expect(ctx?.agentPreset).toBeUndefined()
+  })
+
+  it('sessionCreatedContext carries the same lineage metadata', () => {
+    const ctx = sessionCreatedContext(lineageSession())
+    expect(ctx).toMatchObject({
+      event: 'session/created',
+      parentSessionId: 'parent-9',
+      subagent: true,
+      delegationDepth: 1,
+      sessionCreatedAt: 1750000000000,
+    })
+  })
+})
+
+describe('approval/decided pairing', () => {
+  it('pairs decided with the remembered asked tool and call id', () => {
+    const session = fakeSession('s4')
+    classifySessionEvent(session, sessionEvent('approval/asked', { id: 'a1', toolName: 'pwsh', callId: 'c1' }))
+    const ctx = classifySessionEvent(session, sessionEvent('approval/decided', { id: 'a1', outcome: 'allowed' }))
+    expect(ctx).toMatchObject({
+      event: 'approval/decided',
+      sessionId: 's4',
+      approvalId: 'a1',
+      approvalOutcome: 'allowed',
+      tool: 'pwsh',
+      callId: 'c1',
+    })
+  })
+
+  it('carries only id and outcome when no ask was remembered', () => {
+    const ctx = classifySessionEvent(fakeSession('s4'), sessionEvent('approval/decided', { id: 'a2', outcome: 'denied' }))
+    expect(ctx).toMatchObject({ event: 'approval/decided', approvalId: 'a2', approvalOutcome: 'denied' })
+    expect(ctx?.tool).toBeUndefined()
+    expect(ctx?.callId).toBeUndefined()
+  })
+
+  it('consumes the remembered ask so a duplicate decided does not re-pair', () => {
+    const session = fakeSession('s4')
+    classifySessionEvent(session, sessionEvent('approval/asked', { id: 'a1', toolName: 'pwsh', callId: 'c1' }))
+    classifySessionEvent(session, sessionEvent('approval/decided', { id: 'a1', outcome: 'allowed' }))
+    const again = classifySessionEvent(session, sessionEvent('approval/decided', { id: 'a1', outcome: 'allowed' }))
+    expect(again?.tool).toBeUndefined()
+    expect(again?.callId).toBeUndefined()
   })
 })
 
