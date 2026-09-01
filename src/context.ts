@@ -57,6 +57,10 @@ export interface HookContext {
   approvalId?: string
   /** Approval decision outcome (approval/decided). */
   approvalOutcome?: string
+  /** Total subagents in the settled tree (tree/settled). */
+  totalSubagents?: number
+  /** Parent turn/end → tree settle duration, ms (tree/settled). */
+  treeDurationMs?: number
   timestamp: string
 }
 
@@ -90,6 +94,8 @@ export function toEnv(ctx: HookContext): Record<string, string> {
   if (ctx.agentPreset !== undefined) env.DSH_HOOK_AGENT_PRESET = ctx.agentPreset
   if (ctx.approvalId !== undefined) env.DSH_HOOK_APPROVAL_ID = ctx.approvalId
   if (ctx.approvalOutcome !== undefined) env.DSH_HOOK_APPROVAL_OUTCOME = ctx.approvalOutcome
+  if (ctx.totalSubagents !== undefined) env.DSH_HOOK_TOTAL_SUBAGENTS = String(ctx.totalSubagents)
+  if (ctx.treeDurationMs !== undefined) env.DSH_HOOK_TREE_DURATION_MS = String(ctx.treeDurationMs)
   return env
 }
 

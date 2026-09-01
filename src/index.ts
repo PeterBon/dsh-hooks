@@ -13,6 +13,7 @@ import {
   matchFilters,
   sessionCreatedContext,
   sessionDisposedContext,
+  treeSettledContext,
   type AgentCreatedPayload,
   type AgentDisposedPayload,
   type AgentErrorPayload,
@@ -39,27 +40,35 @@ interface SubagentsLike {
   listDescendants(rootSessionId: string): Promise<Array<{ id?: string }>>
 }
 
+/** Snapshot of one session's subagent tree: live-running plus total descendants. */
+export interface SubagentTreeStats {
+  /** Descendants whose live agent status is `running`. */
+  running: number
+  /** Total descendants in the durable tree (running, idle, or settled). */
+  total: number
+}
+
 /**
- * Count live agents still running in one session's descendant subagent tree.
+ * Inspect one session's descendant subagent tree.
  *
  * Lineage comes from the durable session tree (`subagents.listDescendants`,
  * driven by the session header `parentSession`): a subagent's runtime owner
  * in the agents registry is the subagent manager's host-level scope, not the
  * parent agent, so ownership chains (`agents.isOwnedBy`) cannot find children.
- * Only agents whose live status is `running` count — a settled/idle
- * continuable child no longer suppresses the turn/end notification. Returns 0
- * when the session has no live agent or the services are unavailable.
+ * Only agents whose live status is `running` count as running — a settled/idle
+ * continuable child does not. Returns `{ running: 0, total: 0 }` when the
+ * session has no live agent or the services are unavailable.
  *
  * The live-registry scan is strictly a fallback for when listing is
  * unavailable (service absent or listing threw): a successful empty listing
  * stays empty, so ordinary subagent-free turns don't pay an O(registry) scan.
  */
-export async function countRunningSubagents(
+export async function inspectSubagentTree(
   agents: AgentsLike,
   subagents: SubagentsLike | undefined,
   sessionId: string | undefined,
-): Promise<number> {
-  if (sessionId === undefined || agents.get(sessionId) === undefined) return 0
+): Promise<SubagentTreeStats> {
+  if (sessionId === undefined || agents.get(sessionId) === undefined) return { running: 0, total: 0 }
   let ids: string[] = []
   let listed = false
   if (subagents !== undefined) {
@@ -74,18 +83,30 @@ export async function countRunningSubagents(
   }
   if (!listed) {
     const owner = agents.get(sessionId)
-    if (owner === undefined) return 0
+    if (owner === undefined) return { running: 0, total: 0 }
     ids = agents
       .list()
       .filter((candidate) => candidate !== owner && agents.isOwnedBy(candidate.id, owner))
       .map((candidate) => candidate.id)
   }
-  let count = 0
+  let running = 0
   for (const id of ids) {
     const agent = agents.get(id)
-    if (agent !== undefined && agent.status === 'running') count++
+    if (agent !== undefined && agent.status === 'running') running++
   }
-  return count
+  return { running, total: ids.length }
+}
+
+/**
+ * Count live agents still running in one session's descendant subagent tree
+ * (the `running` half of {@link inspectSubagentTree}).
+ */
+export async function countRunningSubagents(
+  agents: AgentsLike,
+  subagents: SubagentsLike | undefined,
+  sessionId: string | undefined,
+): Promise<number> {
+  return (await inspectSubagentTree(agents, subagents, sessionId)).running
 }
 
 // Dependency on the session service: `session/event` only exists once a
@@ -101,7 +122,7 @@ export { createHistorySink } from './history.js'
  * exists (web profile). Tells agents the plugin exists and how to cooperate.
  */
 export const DSH_HOOKS_GUIDANCE =
-  '本机已安装 dsh-hooks 插件（DeepSeek Harness 配置驱动生命周期 hooks）：可在 profile 的 cordis.patch.yml 声明「事件 → 命令/通知」的 hook（turn/start、turn/end、step/end、tool/call、tool/result、user/message、approval/asked、approval/decided、session/title、session/created、session/disposed、agent/created、agent/disposed、agent/error、agent/status 共 15 类事件），支持 when 原因过滤、match 字段正则过滤、stdin JSON 输入、opt-in 重试、内置 webhook/desktop 通知渠道；执行历史记录于 ~/.dsh/dsh-hooks/history.jsonl；`dsh-hooks dry-run <event>` 可模拟事件验证配置。用户提到「hooks / 钩子 / 生命周期 / 通知配置」时即指本插件，请据此协作。'
+  '本机已安装 dsh-hooks 插件（DeepSeek Harness 配置驱动生命周期 hooks）：可在 profile 的 cordis.patch.yml 声明「事件 → 命令/通知」的 hook（turn/start、turn/end、tree/settled、step/end、tool/call、tool/result、user/message、approval/asked、approval/decided、session/title、session/created、session/disposed、agent/created、agent/disposed、agent/error、agent/status 共 16 类事件），支持 when 原因过滤、match 字段正则过滤、stdin JSON 输入、opt-in 重试、内置 webhook/desktop 通知渠道；执行历史记录于 ~/.dsh/dsh-hooks/history.jsonl；`dsh-hooks dry-run <event>` 可模拟事件验证配置。用户提到「hooks / 钩子 / 生命周期 / 通知配置」时即指本插件，请据此协作。'
 
 export function apply(ctx: Context, config: Config = {}) {
   const hooks: readonly HookSpec[] = config.hooks ?? []
@@ -157,7 +178,45 @@ export function apply(ctx: Context, config: Config = {}) {
   // "the turn finished for real". The services are read lazily at event time —
   // at plugin apply time the agents/subagents rows may not be composed yet.
   let warnedAgentsUnavailable = false
-  const matchAfterSubagentCount = async (ctxValue: HookContext, reasonKind?: TurnEndReasonKind): Promise<void> => {
+
+  /** Sessions whose turn ended with running subagents, awaiting tree settle. */
+  interface WatchedTree {
+    session: Session
+    startedAt: number
+  }
+  const watchedTrees = new Map<string, WatchedTree>()
+
+  /**
+   * Re-check every watched tree on subagent-activity signals (any turn/end or
+   * agent/status). Each entry is claimed (deleted) before its await, so a
+   * concurrent refresh can never emit the same settle twice; entries whose
+   * tree is still running are re-armed. Best-effort: a failed re-check or a
+   * vanished service drops the watch silently instead of leaking it.
+   */
+  const refreshWatchedTrees = async (): Promise<void> => {
+    if (watchedTrees.size === 0) return
+    const agents = ctx.get('agents', false) as AgentsLike | undefined
+    if (agents === undefined) {
+      watchedTrees.clear()
+      return
+    }
+    const subagents = ctx.get('subagents', false) as SubagentsLike | undefined
+    for (const [sessionId, entry] of [...watchedTrees]) {
+      watchedTrees.delete(sessionId)
+      try {
+        const { running, total } = await inspectSubagentTree(agents, subagents, sessionId)
+        if (running === 0) {
+          runMatching(treeSettledContext(entry.session, total, Date.now() - entry.startedAt))
+        } else {
+          watchedTrees.set(sessionId, entry)
+        }
+      } catch {
+        // Re-check failed: the claim above already dropped the entry.
+      }
+    }
+  }
+
+  const matchAfterSubagentCount = async (session: Session, ctxValue: HookContext, reasonKind?: TurnEndReasonKind): Promise<void> => {
     const agents = ctx.get('agents', false) as AgentsLike | undefined
     if (agents === undefined) {
       // Warn once, not on every turn/end: profiles without the agents service
@@ -168,13 +227,25 @@ export function apply(ctx: Context, config: Config = {}) {
       }
     } else {
       const subagents = ctx.get('subagents', false) as SubagentsLike | undefined
+      const sessionId = String(session.id)
       try {
-        ctxValue.runningSubagents = await countRunningSubagents(agents, subagents, ctxValue.sessionId)
+        const { running } = await inspectSubagentTree(agents, subagents, ctxValue.sessionId)
+        ctxValue.runningSubagents = running
+        if (running > 0) {
+          // Work was handed off: watch this tree until it settles. A re-handoff
+          // on a later turn restarts the settle clock from that turn/end.
+          watchedTrees.set(sessionId, { session, startedAt: Date.now() })
+        } else {
+          watchedTrees.delete(sessionId)
+        }
       } catch (error) {
         ctx.logger?.warn?.('[dsh-hooks] failed to count running subagents: %s', String(error))
       }
     }
     runMatching(ctxValue, reasonKind)
+    void refreshWatchedTrees().catch((error: unknown) => {
+      ctx.logger?.warn?.('[dsh-hooks] tree settle refresh failed: %s', String(error))
+    })
   }
 
   // Durable session firehose: turn boundaries, steps, tool calls, messages,
@@ -190,7 +261,7 @@ export function apply(ctx: Context, config: Config = {}) {
     // Dispatch is deferred past the async count; guard the fire-and-forget
     // promise so a synchronous throw inside dispatch surfaces as a log line
     // instead of an unhandled rejection.
-    void matchAfterSubagentCount(classified, reasonKind).catch((error: unknown) => {
+    void matchAfterSubagentCount(session, classified, reasonKind).catch((error: unknown) => {
       ctx.logger?.warn?.('[dsh-hooks] turn/end dispatch failed: %s', String(error))
     })
   })
@@ -200,6 +271,7 @@ export function apply(ctx: Context, config: Config = {}) {
     runMatching(sessionCreatedContext(session))
   })
   ctx.on('session/disposed', (session: Session) => {
+    watchedTrees.delete(String(session.id))
     runMatching(sessionDisposedContext(session))
   })
 
@@ -215,10 +287,15 @@ export function apply(ctx: Context, config: Config = {}) {
   })
   ctx.on('agent/status', (payload: AgentStatusPayload) => {
     runMatching(agentStatusContext(payload.agent, payload.status))
+    // A child agent going idle is the settle signal for watched trees.
+    void refreshWatchedTrees().catch((error: unknown) => {
+      ctx.logger?.warn?.('[dsh-hooks] tree settle refresh failed: %s', String(error))
+    })
   })
 
   ctx.effect(() => () => {
     runner.dispose()
+    watchedTrees.clear()
   })
 }
 
@@ -232,4 +309,4 @@ function extractReasonKind(event: unknown): TurnEndReasonKind | undefined {
 
 // Referenced only for tree-shaking clarity of the module contract; exported
 // for tests that need deterministic bookkeeping.
-export const _internals = { clearTurnTracking, countRunningSubagents }
+export const _internals = { clearTurnTracking, countRunningSubagents, inspectSubagentTree }

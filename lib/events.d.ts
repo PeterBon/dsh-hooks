@@ -113,6 +113,12 @@ export declare function sessionCreatedContext(session: Session): HookContext;
 export declare function sessionDisposedContext(session: Session): HookContext;
 export declare function approvalContext(session: Session, data: ApprovalAskedData): HookContext;
 export declare function approvalDecidedContext(session: Session, data: ApprovalDecidedData): HookContext;
+/**
+ * Synthetic `tree/settled` context: the session's whole subagent tree has
+ * settled (no live child still running) after a turn ended with work handed
+ * off. Emitted by index.ts, not classified from a session log event.
+ */
+export declare function treeSettledContext(session: Session, totalSubagents: number, treeDurationMs: number): HookContext;
 export declare function agentCreatedContext(agent: AgentLike): HookContext;
 export declare function agentDisposedContext(agent: AgentLike): HookContext;
 export declare function agentErrorContext(agent: AgentLike, turn: number | undefined, error: unknown): HookContext;

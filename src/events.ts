@@ -411,6 +411,20 @@ export function approvalDecidedContext(session: Session, data: ApprovalDecidedDa
   }
 }
 
+/**
+ * Synthetic `tree/settled` context: the session's whole subagent tree has
+ * settled (no live child still running) after a turn ended with work handed
+ * off. Emitted by index.ts, not classified from a session log event.
+ */
+export function treeSettledContext(session: Session, totalSubagents: number, treeDurationMs: number): HookContext {
+  return {
+    ...baseContext(session, 'tree/settled'),
+    reason: 'settled',
+    totalSubagents,
+    treeDurationMs,
+  }
+}
+
 export function agentCreatedContext(agent: AgentLike): HookContext {
   return {
     event: 'agent/created',
