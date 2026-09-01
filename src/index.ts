@@ -273,6 +273,10 @@ export function apply(ctx: Context, config: Config = {}) {
   ctx.on('session/disposed', (session: Session) => {
     watchedTrees.delete(String(session.id))
     runMatching(sessionDisposedContext(session))
+    // A child session leaving the store is also settle-relevant activity.
+    void refreshWatchedTrees().catch((error: unknown) => {
+      ctx.logger?.warn?.('[dsh-hooks] tree settle refresh failed: %s', String(error))
+    })
   })
 
   // Agent lifecycle events.
@@ -281,6 +285,11 @@ export function apply(ctx: Context, config: Config = {}) {
   })
   ctx.on('agent/disposed', (payload: AgentDisposedPayload) => {
     runMatching(agentDisposedContext(payload.agent))
+    // A disposed (interrupted/killed) child agent can never settle on its
+    // own — re-check watched trees so its parent's settle still fires.
+    void refreshWatchedTrees().catch((error: unknown) => {
+      ctx.logger?.warn?.('[dsh-hooks] tree settle refresh failed: %s', String(error))
+    })
   })
   ctx.on('agent/error', (payload: AgentErrorPayload) => {
     runMatching(agentErrorContext(payload.agent, payload.turn, payload.error))

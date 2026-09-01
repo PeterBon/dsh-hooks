@@ -321,6 +321,7 @@ describe('tree/settled wiring', () => {
     return {
       sessionEvent: (session: unknown, event: unknown) => listeners.get('session/event')?.[0]?.(session, event),
       agentStatus: (payload: unknown) => listeners.get('agent/status')?.[0]?.(payload),
+      agentDisposed: (payload: unknown) => listeners.get('agent/disposed')?.[0]?.(payload),
       sessionDisposed: (session: unknown) => listeners.get('session/disposed')?.[0]?.(session),
     }
   }
@@ -367,6 +368,26 @@ describe('tree/settled wiring', () => {
 
     running = false
     agentStatus({ agent: { id: 'sub-1' }, status: 'idle' })
+    await flush()
+
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(spawnEnv().DSH_HOOK_EVENT).toBe('tree/settled')
+  })
+
+  it('settles watched trees when the child agent is disposed instead of settling', async () => {
+    const { sessionEvent, agentDisposed } = wireTree(
+      { agents, subagents },
+      { hooks: [{ on: 'tree/settled', run: 'node -e ""' }], history: { enabled: false } },
+    )
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+
+    sessionEvent(parentSession, turnEndEvent)
+    await flush()
+    expect(spawnMock).not.toHaveBeenCalled()
+
+    running = false // interrupted/killed: registry entry gone, tree lists it but not running
+    agentDisposed({ agent: { id: 'sub-1' } })
     await flush()
 
     expect(spawnMock).toHaveBeenCalledOnce()
