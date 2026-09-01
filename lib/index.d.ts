@@ -33,6 +33,10 @@ interface SubagentsLike {
  * Only agents whose live status is `running` count — a settled/idle
  * continuable child no longer suppresses the turn/end notification. Returns 0
  * when the session has no live agent or the services are unavailable.
+ *
+ * The live-registry scan is strictly a fallback for when listing is
+ * unavailable (service absent or listing threw): a successful empty listing
+ * stays empty, so ordinary subagent-free turns don't pay an O(registry) scan.
  */
 export declare function countRunningSubagents(agents: AgentsLike, subagents: SubagentsLike | undefined, sessionId: string | undefined): Promise<number>;
 export declare const inject: readonly ['sessions'];

@@ -123,6 +123,17 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.
+- `turn/end` hooks are dispatched after the running-subagent count resolves, i.e. one async hop later than other events — an immediately following event from the same session (e.g. the next `turn/start`) may dispatch first.
+
+A common use for `DSH_HOOK_RUNNING_SUBAGENTS` is suppressing the end-of-turn notification while background subagents are still working and only notifying once a turn settles with nothing left running. Note the parent session emits `turn/end` exactly once (with the count > 0); the "everything settled" signal arrives as `turn/end` on the last child session, whose count is `0`:
+
+```yaml
+- on: 'turn/end'
+  match: { runningSubagents: '^0$' }  # anchor the regex: bare '0' also matches '10'
+  run: 'node examples/notify-webhook.mjs'
+```
+
+Settled-but-idle continuable children do not count as running, so they don't keep suppressing the notification.
 
 ## Generic webhook example
 

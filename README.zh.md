@@ -119,9 +119,21 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | 本回合缓存读 token（有上报时） |
 | `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | 本回合缓存写 token（有上报时） |
 | `DSH_HOOK_USAGE_REASONING_TOKENS` | 本回合思考 token（有上报时） |
+| `DSH_HOOK_RUNNING_SUBAGENTS` | 本会话下仍在运行的存活子代理数（turn/end；`0` = 无——让 hook 能区分「工作已交给后台子代理」与「回合真正结束」） |
 | `DSH_HOOK_TIMESTAMP` | ISO 时间戳 |
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。
+- `turn/end` 的 hook 在运行中子代理计数解析完成后才派发，比其他事件晚一个异步跳——同会话紧随其后的事件（如下一轮 `turn/start`）可能先执行。
+
+`DSH_HOOK_RUNNING_SUBAGENTS` 的典型用法：后台子代理还在运行时抑制回合结束通知，只在本会话回合真正落定时才通知。注意父会话只会收到一次 `turn/end`（此时计数 > 0）；「全部落定」的信号由最后一个子会话自己的 `turn/end`（计数为 `0`）送达：
+
+```yaml
+- on: 'turn/end'
+  match: { runningSubagents: '^0$' }  # 正则要锚定：裸 '0' 也会匹配 '10'
+  run: 'node examples/notify-webhook.mjs'
+```
+
+已落定但闲置（idle）的 continuable 子代理不计入运行中，不会一直压住通知。
 
 ## 执行历史
 

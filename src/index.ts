@@ -49,6 +49,10 @@ interface SubagentsLike {
  * Only agents whose live status is `running` count — a settled/idle
  * continuable child no longer suppresses the turn/end notification. Returns 0
  * when the session has no live agent or the services are unavailable.
+ *
+ * The live-registry scan is strictly a fallback for when listing is
+ * unavailable (service absent or listing threw): a successful empty listing
+ * stays empty, so ordinary subagent-free turns don't pay an O(registry) scan.
  */
 export async function countRunningSubagents(
   agents: AgentsLike,
@@ -57,16 +61,18 @@ export async function countRunningSubagents(
 ): Promise<number> {
   if (sessionId === undefined || agents.get(sessionId) === undefined) return 0
   let ids: string[] = []
+  let listed = false
   if (subagents !== undefined) {
     try {
       ids = (await subagents.listDescendants(sessionId))
         .map((row) => row.id)
         .filter((id): id is string => typeof id === 'string' && id !== sessionId)
+      listed = true
     } catch {
       // listing unavailable — fall back to the live-registry child scan below
     }
   }
-  if (ids.length === 0) {
+  if (!listed) {
     const owner = agents.get(sessionId)
     if (owner === undefined) return 0
     ids = agents
@@ -150,10 +156,16 @@ export function apply(ctx: Context, config: Config = {}) {
   // so a hook can tell "work handed off to still-running subagents" apart from
   // "the turn finished for real". The services are read lazily at event time —
   // at plugin apply time the agents/subagents rows may not be composed yet.
+  let warnedAgentsUnavailable = false
   const matchAfterSubagentCount = async (ctxValue: HookContext, reasonKind?: TurnEndReasonKind): Promise<void> => {
     const agents = ctx.get('agents', false) as AgentsLike | undefined
     if (agents === undefined) {
-      ctx.logger?.warn?.('[dsh-hooks] agents service unavailable at turn/end — runningSubagents stays 0')
+      // Warn once, not on every turn/end: profiles without the agents service
+      // would otherwise spam the log on each turn boundary.
+      if (!warnedAgentsUnavailable) {
+        warnedAgentsUnavailable = true
+        ctx.logger?.warn?.('[dsh-hooks] agents service unavailable at turn/end — runningSubagents stays 0')
+      }
     } else {
       const subagents = ctx.get('subagents', false) as SubagentsLike | undefined
       try {
@@ -175,7 +187,12 @@ export function apply(ctx: Context, config: Config = {}) {
       runMatching(classified, reasonKind)
       return
     }
-    void matchAfterSubagentCount(classified, reasonKind)
+    // Dispatch is deferred past the async count; guard the fire-and-forget
+    // promise so a synchronous throw inside dispatch surfaces as a log line
+    // instead of an unhandled rejection.
+    void matchAfterSubagentCount(classified, reasonKind).catch((error: unknown) => {
+      ctx.logger?.warn?.('[dsh-hooks] turn/end dispatch failed: %s', String(error))
+    })
   })
 
   // Session lifecycle (published by the session store, not the firehose).

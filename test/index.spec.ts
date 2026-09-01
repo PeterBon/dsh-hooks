@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
 import { apply, countRunningSubagents, DSH_HOOKS_GUIDANCE } from '../src/index.js'
+
+// Mock spawn so dispatched hooks never launch real shells in tests.
+vi.mock('node:child_process', () => ({ spawn: vi.fn() }))
+import { spawn } from 'node:child_process'
 
 /** Minimal cordis Context fake: get/on/effect only, services injected. */
 function fakeCtx(services: Record<string, unknown> = {}) {
@@ -22,6 +26,43 @@ function fakeCtx(services: Record<string, unknown> = {}) {
   }
   return { ctx: ctx as unknown as Context, listeners, effectLabels }
 }
+
+/** EventEmitter-like fake child with registered listener storage. */
+function fakeChild() {
+  const listeners: Record<string, Array<(v?: unknown) => void>> = {}
+  const child = {
+    pid: 12345,
+    stdin: {
+      on: vi.fn(),
+      write: vi.fn(),
+      end: vi.fn(),
+    },
+    stdout: {
+      on: vi.fn((event: string, cb: (v?: unknown) => void) => {
+        ;(listeners[event] ??= []).push(cb)
+      }),
+    },
+    stderr: {
+      on: vi.fn((event: string, cb: (v?: unknown) => void) => {
+        ;(listeners[event] ??= []).push(cb)
+      }),
+    },
+    unref: vi.fn(),
+    kill: vi.fn(),
+    on: vi.fn((event: string, cb: (v?: unknown) => void) => {
+      ;(listeners[event] ??= []).push(cb)
+      return child
+    }),
+  }
+  return child
+}
+let fakeChildRef: ReturnType<typeof fakeChild>
+
+const spawnMock = vi.mocked(spawn)
+
+afterEach(() => {
+  vi.clearAllMocks()
+})
 
 describe('apply soft-dependency wiring', () => {
   it('works without webServer or systemPrompt (CLI/headless)', () => {
@@ -103,8 +144,112 @@ describe('countRunningSubagents', () => {
     await expect(countRunningSubagents(agents, descendants([{ id: 'sub-1' }]), 'nope')).resolves.toBe(0)
   })
 
-  it('falls back to the live-registry scan when listing throws', async () => {
+  it('returns 0 when listing throws and the registry scan finds no owner match', async () => {
     const broken = { listDescendants: async () => { throw new Error('boom') } }
     await expect(countRunningSubagents(agents, broken, 'session-main')).resolves.toBe(0)
+  })
+
+  it('finds live children through the registry scan when the subagents service is absent', async () => {
+    const owned = { ...agents, isOwnedBy: (id: string) => id === 'sub-1' }
+    await expect(countRunningSubagents(owned, undefined, 'session-main')).resolves.toBe(1)
+  })
+
+  it('finds live children through the registry scan when listing throws', async () => {
+    const broken = { listDescendants: async () => { throw new Error('boom') } }
+    const owned = { ...agents, isOwnedBy: (id: string) => id === 'sub-1' }
+    await expect(countRunningSubagents(owned, broken, 'session-main')).resolves.toBe(1)
+  })
+
+  it('does not consult the registry when listing succeeds with no descendants', async () => {
+    // A lying registry would claim ownership of sub-1; the successful empty
+    // listing must win, keeping ordinary subagent-free turns scan-free.
+    const lying = { ...agents, isOwnedBy: () => true }
+    await expect(countRunningSubagents(lying, descendants([]), 'session-main')).resolves.toBe(0)
+  })
+})
+
+describe('turn/end dispatch wiring', () => {
+  const sessionObj = { id: 'session-main', header: { cwd: 'C:/tmp' }, events: [] }
+  const turnEndEvent = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
+  const userMessageEvent = { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } } }
+  const parent = { id: 'session-main', status: 'idle' }
+  const runningChild = { id: 'sub-1', status: 'running' }
+  const agents = {
+    get: (id: string) => (id === 'session-main' ? parent : id === 'sub-1' ? runningChild : undefined),
+    list: () => [parent, runningChild],
+    isOwnedBy: () => false,
+  }
+  const subagents = { listDescendants: async () => [{ id: 'sub-1' }] }
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const spawnEnv = () => {
+    const [, options] = spawnMock.mock.calls[0] as [string, { env: Record<string, string | undefined> }]
+    return options.env ?? {}
+  }
+
+  function wire(services: Record<string, unknown>, config: Parameters<typeof apply>[1]) {
+    const { ctx, listeners } = fakeCtx(services)
+    apply(ctx, config)
+    const sessionEvent = listeners.get('session/event')
+    return { emit: (event: unknown = turnEndEvent) => sessionEvent?.[0]?.(sessionObj, event) }
+  }
+
+  it('fills the running-subagent count before dispatching turn/end hooks', async () => {
+    const { emit } = wire(
+      { agents, subagents },
+      { hooks: [{ on: 'turn/end', run: 'node -e ""' }], history: { enabled: false } },
+    )
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+
+    emit()
+    // Deferred dispatch: nothing may run before the async count resolves.
+    expect(spawnMock).not.toHaveBeenCalled()
+
+    await flush()
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(spawnEnv().DSH_HOOK_RUNNING_SUBAGENTS).toBe('1')
+  })
+
+  it('still dispatches (count 0) when the agents service is missing', async () => {
+    const { emit } = wire({}, { hooks: [{ on: 'turn/end', run: 'node -e ""' }], history: { enabled: false } })
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+
+    emit()
+    await flush()
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(spawnEnv().DSH_HOOK_RUNNING_SUBAGENTS).toBe('0')
+  })
+
+  it('still dispatches (count 0) when the descendant listing throws', async () => {
+    const broken = { listDescendants: async () => { throw new Error('boom') } }
+    const { emit } = wire(
+      { agents, subagents: broken },
+      { hooks: [{ on: 'turn/end', run: 'node -e ""' }], history: { enabled: false } },
+    )
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+
+    emit()
+    await flush()
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(spawnEnv().DSH_HOOK_RUNNING_SUBAGENTS).toBe('0')
+  })
+
+  it('dispatches non-turn/end events synchronously, without the field', async () => {
+    const { emit } = wire(
+      { agents, subagents },
+      { hooks: [{ on: 'user/message', run: 'node -e ""' }], history: { enabled: false } },
+    )
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+
+    emit(userMessageEvent)
+    expect(spawnMock).toHaveBeenCalledOnce()
+    expect(spawnEnv().DSH_HOOK_RUNNING_SUBAGENTS).toBeUndefined()
+
+    await flush()
+    expect(spawnMock).toHaveBeenCalledOnce()
   })
 })
