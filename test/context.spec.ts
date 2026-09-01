@@ -137,3 +137,56 @@ describe('runningSubagents', () => {
     expect('DSH_HOOK_RUNNING_SUBAGENTS' in env).toBe(false)
   })
 })
+
+describe('session lineage metadata', () => {
+  it('maps lineage fields to environment variables', () => {
+    const env = toEnv({
+      event: 'turn/end',
+      parentSessionId: 'parent-1',
+      subagent: true,
+      delegationDepth: 2,
+      sessionCreatedAt: 1750000000000,
+      agentPreset: 'liangshen',
+      timestamp: 'T',
+    })
+    expect(env.DSH_HOOK_PARENT_SESSION_ID).toBe('parent-1')
+    expect(env.DSH_HOOK_SUBAGENT).toBe('1')
+    expect(env.DSH_HOOK_DELEGATION_DEPTH).toBe('2')
+    expect(env.DSH_HOOK_SESSION_CREATED_AT).toBe('1750000000000')
+    expect(env.DSH_HOOK_AGENT_PRESET).toBe('liangshen')
+  })
+
+  it('renders top-level sessions as subagent 0 with depth 0', () => {
+    const env = toEnv({ event: 'turn/end', subagent: false, delegationDepth: 0, timestamp: 'T' })
+    expect(env.DSH_HOOK_SUBAGENT).toBe('0')
+    expect(env.DSH_HOOK_DELEGATION_DEPTH).toBe('0')
+  })
+
+  it('omits lineage variables when the fields are absent', () => {
+    const env = toEnv({ event: 'turn/end', timestamp: 'T' })
+    expect('DSH_HOOK_PARENT_SESSION_ID' in env).toBe(false)
+    expect('DSH_HOOK_SUBAGENT' in env).toBe(false)
+    expect('DSH_HOOK_SESSION_CREATED_AT' in env).toBe(false)
+  })
+})
+
+describe('approval decided fields', () => {
+  it('maps approval id and outcome to environment variables', () => {
+    const env = toEnv({
+      event: 'approval/decided',
+      approvalId: 'appr-9',
+      approvalOutcome: 'allowed',
+      tool: 'pwsh',
+      timestamp: 'T',
+    })
+    expect(env.DSH_HOOK_APPROVAL_ID).toBe('appr-9')
+    expect(env.DSH_HOOK_APPROVAL_OUTCOME).toBe('allowed')
+    expect(env.DSH_HOOK_TOOL).toBe('pwsh')
+  })
+
+  it('omits approval variables when absent', () => {
+    const env = toEnv({ event: 'turn/end', timestamp: 'T' })
+    expect('DSH_HOOK_APPROVAL_ID' in env).toBe(false)
+    expect('DSH_HOOK_APPROVAL_OUTCOME' in env).toBe(false)
+  })
+})

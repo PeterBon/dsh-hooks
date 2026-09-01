@@ -80,7 +80,8 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `tool/call` | 模型请求一次工具调用 | 工具名、调用 id、原始参数 JSON |
 | `tool/result` | 工具调用完成 | 工具名（自动反查）、结果文本、失败标识 |
 | `user/message` | 会话表面出现用户角色消息 | 来源 kind（`user` / `plugin` / …）、消息文本 |
-| `approval/asked` | 工具调用请求用户审批 | 工具名、调用 id、原因 |
+| `approval/asked` | 工具调用请求用户审批 | 工具名、调用 id、审批 id、原因 |
+| `approval/decided` | 待审批项得出结果（与 `approval/asked` 按 id 配对） | 结果 outcome、工具名（自动反查）、调用 id、审批 id |
 | `session/title` | 会话标题更新（显式改名 / LLM 生成 / 回退） | 新标题、来源 kind |
 | `session/created` | 会话发布 | 会话 id、cwd |
 | `session/disposed` | 会话离开注册表 | 会话 id、cwd |
@@ -120,6 +121,13 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | 本回合缓存写 token（有上报时） |
 | `DSH_HOOK_USAGE_REASONING_TOKENS` | 本回合思考 token（有上报时） |
 | `DSH_HOOK_RUNNING_SUBAGENTS` | 本会话下仍在运行的存活子代理数（turn/end；`0` = 无——让 hook 能区分「工作已交给后台子代理」与「回合真正结束」） |
+| `DSH_HOOK_PARENT_SESSION_ID` | 父会话 id（子代理谱系；顶层会话无此变量） |
+| `DSH_HOOK_SUBAGENT` | 会话为子代理时为 `1`，否则 `0` |
+| `DSH_HOOK_DELEGATION_DEPTH` | 会话头中的委托深度（`0` = 顶层会话） |
+| `DSH_HOOK_SESSION_CREATED_AT` | 会话创建时间，epoch 毫秒 |
+| `DSH_HOOK_AGENT_PRESET` | 组合该会话 Agent 的预设 id（有值时） |
+| `DSH_HOOK_APPROVAL_ID` | 审批审计 id（`approval/asked` 与 `approval/decided` 共用） |
+| `DSH_HOOK_APPROVAL_OUTCOME` | 审批结果 outcome（`approval/decided`） |
 | `DSH_HOOK_TIMESTAMP` | ISO 时间戳 |
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。

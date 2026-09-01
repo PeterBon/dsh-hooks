@@ -42,6 +42,20 @@ export interface HookContext {
      * from the agents/subagents services when they are available.
      */
     runningSubagents?: number;
+    /** Subagent lineage: the parent session id (session header `parentSession`). */
+    parentSessionId?: string;
+    /** Whether the session was created as a subagent child (header `origin`). */
+    subagent?: boolean;
+    /** Delegation depth from the session header; 0 = top-level session. */
+    delegationDepth?: number;
+    /** Session creation time, epoch ms (session header `createdAt`). */
+    sessionCreatedAt?: number;
+    /** Agent preset id that composed the session's agent (header `agentPreset`). */
+    agentPreset?: string;
+    /** Approval audit id, pairing `approval/asked` with `approval/decided`. */
+    approvalId?: string;
+    /** Approval decision outcome (approval/decided). */
+    approvalOutcome?: string;
     timestamp: string;
 }
 export declare function toEnv(ctx: HookContext): Record<string, string>;

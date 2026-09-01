@@ -80,7 +80,8 @@ Every hook field:
 | `tool/call` | The model requests one tool invocation | tool name, call id, raw arguments JSON |
 | `tool/result` | A tool call completes | tool name (resolved), result text, failure identity |
 | `user/message` | A user-role message appears on the surface | source kind (`user` / `plugin` / …), message text |
-| `approval/asked` | A tool call requests user approval | tool name, call id, reason |
+| `approval/asked` | A tool call requests user approval | tool name, call id, approval id, reason |
+| `approval/decided` | A pending approval gets its outcome (paired with `approval/asked` by id) | outcome, tool name (resolved), call id, approval id |
 | `session/title` | The session title updates (explicit rename / LLM title / fallback) | new title, source kind |
 | `session/created` | A session is published | session id, cwd |
 | `session/disposed` | A session leaves the registry | session id, cwd |
@@ -120,6 +121,13 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | aggregated cache-write tokens, when reported |
 | `DSH_HOOK_USAGE_REASONING_TOKENS` | aggregated reasoning tokens, when reported |
 | `DSH_HOOK_RUNNING_SUBAGENTS` | live subagents still running under this session (turn/end; `0` = none — lets a hook tell "work handed off to background subagents" apart from "the turn finished for real") |
+| `DSH_HOOK_PARENT_SESSION_ID` | parent session id (subagent lineage; absent for top-level sessions) |
+| `DSH_HOOK_SUBAGENT` | `1` when the session is a subagent child, `0` otherwise |
+| `DSH_HOOK_DELEGATION_DEPTH` | delegation depth from the session header (`0` = top-level session) |
+| `DSH_HOOK_SESSION_CREATED_AT` | session creation time, epoch ms |
+| `DSH_HOOK_AGENT_PRESET` | agent preset id composing the session's agent, when known |
+| `DSH_HOOK_APPROVAL_ID` | approval audit id (`approval/asked` + `approval/decided`) |
+| `DSH_HOOK_APPROVAL_OUTCOME` | approval decision outcome (`approval/decided`) |
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.
