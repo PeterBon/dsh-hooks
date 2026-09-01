@@ -75,7 +75,8 @@ Every hook field:
 | Event | When it fires | Useful context |
 | --- | --- | --- |
 | `turn/start` | A turn begins | session id, turn |
-| `turn/end` | A turn ends (`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`) | reason, turn, duration, content, turn token usage |
+| `turn/end` | A turn ends (`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`) | reason, turn, duration, content, turn token usage, running subagents |
+| `tree/settled` | A watched session's whole subagent tree settles (no live child still running) after a turn ended with work handed off | total subagents, handoff→settle duration |
 | `step/end` | One step of a turn ends (one model call plus its tool executions) | turn, step |
 | `tool/call` | The model requests one tool invocation | tool name, call id, raw arguments JSON |
 | `tool/result` | A tool call completes | tool name (resolved), result text, failure identity |
@@ -128,6 +129,8 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_AGENT_PRESET` | agent preset id composing the session's agent, when known |
 | `DSH_HOOK_APPROVAL_ID` | approval audit id (`approval/asked` + `approval/decided`) |
 | `DSH_HOOK_APPROVAL_OUTCOME` | approval decision outcome (`approval/decided`) |
+| `DSH_HOOK_TOTAL_SUBAGENTS` | total subagents in the settled tree (`tree/settled`) |
+| `DSH_HOOK_TREE_DURATION_MS` | parent turn/end → tree settle duration, ms (`tree/settled`) |
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.
@@ -141,7 +144,14 @@ A common use for `DSH_HOOK_RUNNING_SUBAGENTS` is suppressing the end-of-turn not
   run: 'node examples/notify-webhook.mjs'
 ```
 
-Settled-but-idle continuable children do not count as running, so they don't keep suppressing the notification.
+For the simpler "notify only once the whole tree settles" pattern, the synthetic `tree/settled` event does the watching for you — the plugin tracks sessions whose turn ended with running subagents and fires `tree/settled` on that session when the tree reaches zero:
+
+```yaml
+- on: 'tree/settled'
+  notify: { channel: 'webhook', url: 'https://hooks.slack.com/services/…' }
+```
+
+Settled-but-idle continuable children do not count as running, so they don't keep suppressing the notification. The settle watch is event-driven and best-effort: it survives until the plugin restarts, and a failed re-check drops the watch silently (no late notification).
 
 ## Generic webhook example
 

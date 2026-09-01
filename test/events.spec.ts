@@ -13,6 +13,7 @@ import {
   sessionDisposedContext,
   sessionTitle,
   statusText,
+  treeSettledContext,
   turnContent,
   turnEndContext,
   turnStartContext,
@@ -317,6 +318,24 @@ describe('approval/decided pairing', () => {
     const again = classifySessionEvent(session, sessionEvent('approval/decided', { id: 'a1', outcome: 'allowed' }))
     expect(again?.tool).toBeUndefined()
     expect(again?.callId).toBeUndefined()
+  })
+})
+
+describe('treeSettledContext', () => {
+  it('builds the synthetic tree/settled context', () => {
+    const ctx = treeSettledContext(fakeSession('s9'), 3, 4200)
+    expect(ctx).toMatchObject({
+      event: 'tree/settled',
+      sessionId: 's9',
+      reason: 'settled',
+      totalSubagents: 3,
+      treeDurationMs: 4200,
+    })
+  })
+
+  it('carries the lineage metadata like other session contexts', () => {
+    const ctx = treeSettledContext(fakeSession('s9'), 0, 0)
+    expect(ctx).toMatchObject({ subagent: false, delegationDepth: 0 })
   })
 })
 

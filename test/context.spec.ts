@@ -190,3 +190,17 @@ describe('approval decided fields', () => {
     expect('DSH_HOOK_APPROVAL_OUTCOME' in env).toBe(false)
   })
 })
+
+describe('tree settled fields', () => {
+  it('maps total subagents and tree duration to environment variables', () => {
+    const env = toEnv({ event: 'tree/settled', totalSubagents: 3, treeDurationMs: 4200, timestamp: 'T' })
+    expect(env.DSH_HOOK_TOTAL_SUBAGENTS).toBe('3')
+    expect(env.DSH_HOOK_TREE_DURATION_MS).toBe('4200')
+  })
+
+  it('omits the variables when absent', () => {
+    const env = toEnv({ event: 'turn/end', timestamp: 'T' })
+    expect('DSH_HOOK_TOTAL_SUBAGENTS' in env).toBe(false)
+    expect('DSH_HOOK_TREE_DURATION_MS' in env).toBe(false)
+  })
+})

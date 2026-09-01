@@ -56,6 +56,10 @@ export interface HookContext {
     approvalId?: string;
     /** Approval decision outcome (approval/decided). */
     approvalOutcome?: string;
+    /** Total subagents in the settled tree (tree/settled). */
+    totalSubagents?: number;
+    /** Parent turn/end → tree settle duration, ms (tree/settled). */
+    treeDurationMs?: number;
     timestamp: string;
 }
 export declare function toEnv(ctx: HookContext): Record<string, string>;

@@ -75,7 +75,8 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | 事件 | 触发时机 | 有用上下文 |
 | --- | --- | --- |
 | `turn/start` | 回合开始 | 会话 id、回合号 |
-| `turn/end` | 回合结束（`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`） | reason、回合号、耗时、内容、本回合 token 用量 |
+| `turn/end` | 回合结束（`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`） | reason、回合号、耗时、内容、本回合 token 用量、运行中子代理数 |
+| `tree/settled` | 回合结束后把工作交给子代理的会话，其整个子代理树全部落定（无存活子代理仍在运行） | 子代理总数、交接到落定的耗时 |
 | `step/end` | 回合内一步结束（一次模型调用 + 其工具执行） | 回合号、步号 |
 | `tool/call` | 模型请求一次工具调用 | 工具名、调用 id、原始参数 JSON |
 | `tool/result` | 工具调用完成 | 工具名（自动反查）、结果文本、失败标识 |
@@ -128,6 +129,8 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_AGENT_PRESET` | 组合该会话 Agent 的预设 id（有值时） |
 | `DSH_HOOK_APPROVAL_ID` | 审批审计 id（`approval/asked` 与 `approval/decided` 共用） |
 | `DSH_HOOK_APPROVAL_OUTCOME` | 审批结果 outcome（`approval/decided`） |
+| `DSH_HOOK_TOTAL_SUBAGENTS` | 已落定树中的子代理总数（`tree/settled`） |
+| `DSH_HOOK_TREE_DURATION_MS` | 父回合结束 → 树落定的耗时（毫秒，`tree/settled`） |
 | `DSH_HOOK_TIMESTAMP` | ISO 时间戳 |
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。
@@ -141,7 +144,14 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
   run: 'node examples/notify-webhook.mjs'
 ```
 
-已落定但闲置（idle）的 continuable 子代理不计入运行中，不会一直压住通知。
+如果只想要「整棵树落定才通知一次」的简单模式，合成事件 `tree/settled` 帮你做了监视：插件跟踪回合结束时仍有运行中子代理的会话，树归零时对该会话发射 `tree/settled`：
+
+```yaml
+- on: 'tree/settled'
+  notify: { channel: 'webhook', url: 'https://hooks.slack.com/services/…' }
+```
+
+已落定但闲置（idle）的 continuable 子代理不计入运行中，不会一直压住通知。落定监视是事件驱动且 best-effort 的：插件重启后监视集合丢失；重查失败会静默放弃该监视（不会补发迟到的通知）。
 
 ## 执行历史
 
