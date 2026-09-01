@@ -205,6 +205,20 @@
   box-sizing: border-box;
 }
 
+/* Native select popups render with the UA color scheme, not the card's
+   translucent field background: in dark mode the option list came out white
+   on white. The shell marks dark mode with body[data-ds-dark-theme] and pairs
+   its surface/foreground design tokens under it — follow both, no ad-hoc
+   colors. */
+body[data-ds-dark-theme] .dh-select {
+  color-scheme: dark;
+}
+
+.dh-select option {
+  background-color: var(--dsw-specific-menu, transparent);
+  color: inherit;
+}
+
 .dh-input:focus,
 .dh-select:focus {
   border-color: var(--dsh-hooks-accent);
