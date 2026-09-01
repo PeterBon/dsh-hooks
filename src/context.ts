@@ -61,6 +61,10 @@ export interface HookContext {
   totalSubagents?: number
   /** Parent turn/end → tree settle duration, ms (tree/settled). */
   treeDurationMs?: number
+  /** Identity summary of the hook that failed consecutively (hook/failed). */
+  hookFailedHook?: string
+  /** Consecutive failure count when the alert fired (hook/failed). */
+  hookFailures?: number
   timestamp: string
 }
 
@@ -96,6 +100,8 @@ export function toEnv(ctx: HookContext): Record<string, string> {
   if (ctx.approvalOutcome !== undefined) env.DSH_HOOK_APPROVAL_OUTCOME = ctx.approvalOutcome
   if (ctx.totalSubagents !== undefined) env.DSH_HOOK_TOTAL_SUBAGENTS = String(ctx.totalSubagents)
   if (ctx.treeDurationMs !== undefined) env.DSH_HOOK_TREE_DURATION_MS = String(ctx.treeDurationMs)
+  if (ctx.hookFailedHook !== undefined) env.DSH_HOOK_FAILED_HOOK = ctx.hookFailedHook
+  if (ctx.hookFailures !== undefined) env.DSH_HOOK_FAILURES = String(ctx.hookFailures)
   return env
 }
 

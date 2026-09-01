@@ -18,6 +18,7 @@ export const HOOK_EVENTS = [
   'agent/disposed',
   'agent/error',
   'agent/status',
+  'hook/failed',
 ] as const
 
 export type HookEvent = (typeof HOOK_EVENTS)[number]
@@ -101,6 +102,13 @@ export interface HistoryConfig {
 export interface Config {
   hooks?: HookSpec[]
   history?: HistoryConfig | null
+  /**
+   * Consecutive failure count (spawn-failed / exit-nonzero / timeout /
+   * send-failed; one logical run counts once, internal retries included)
+   * that emits the synthetic `hook/failed` event. Defaults to 3; values
+   * below 1 are clamped to 1.
+   */
+  failedAlertThreshold?: number
 }
 
 // Explicit structural annotation: the inferred Schema type names the
@@ -114,7 +122,7 @@ export const Config: {
   hooks: Schema.array(
     Schema.object({
       on: Schema.union([...HOOK_EVENTS]).description(
-        '触发事件：turn/start | turn/end | tree/settled | step/end | tool/call | tool/result | user/message | approval/asked | approval/decided | session/title | session/created | session/disposed | agent/created | agent/disposed | agent/error | agent/status',
+        '触发事件：turn/start | turn/end | tree/settled | step/end | tool/call | tool/result | user/message | approval/asked | approval/decided | session/title | session/created | session/disposed | agent/created | agent/disposed | agent/error | agent/status | hook/failed',
       ),
       when: Schema.union([...TURN_END_REASONS]).description(
         '可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted）；其他事件忽略该字段',
@@ -155,4 +163,7 @@ export const Config: {
   ])
     .default(null)
     .description('hook 执行历史：内存环形缓冲 + 可选 JSONL 持久化日志（供 UI/调试使用，严格 best-effort）'),
+  failedAlertThreshold: Schema.natural()
+    .default(3)
+    .description('同一 hook 连续失败达到该次数时发射 hook/failed 合成事件（spawn-failed/exit-nonzero/timeout/send-failed 计失败；一次逻辑执行的最终结果计一次，内部重试不另计；成功清零，触发后去抖）'),
 }).description('dsh-hooks 配置：声明式生命周期 hooks')

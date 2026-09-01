@@ -90,6 +90,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `agent/disposed` | Agent 离开注册表 | 会话 id |
 | `agent/error` | Agent 循环报错 | 错误文本 |
 | `agent/status` | Agent 状态切换 | 状态 |
+| `hook/failed` | 同一 hook 连续失败达到 `failedAlertThreshold`（默认 3；合成事件，从结果流发射） | 失败 hook 摘要、连续失败次数 |
 
 `turn/end` 的 `when` 匹配结束原因（`completed`、`error`…）；其他事件的 hook 无条件执行。
 
@@ -131,9 +132,23 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_APPROVAL_OUTCOME` | 审批结果 outcome（`approval/decided`） |
 | `DSH_HOOK_TOTAL_SUBAGENTS` | 已落定树中的子代理总数（`tree/settled`） |
 | `DSH_HOOK_TREE_DURATION_MS` | 父回合结束 → 树落定的耗时（毫秒，`tree/settled`） |
+| `DSH_HOOK_FAILED_HOOK` | 连续失败的 hook 身份摘要（`hook/failed`） |
+| `DSH_HOOK_FAILURES` | 告警触发时的连续失败次数（`hook/failed`） |
 | `DSH_HOOK_TIMESTAMP` | ISO 时间戳 |
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。
+- 失败告警：fire-and-forget 的 hook 失败本来就是静默的，插件因此同时监视结果流——同一 hook 连续失败 `failedAlertThreshold` 次（`spawn-failed` / `exit-nonzero` / `timeout` / `send-failed`；一次逻辑执行的最终结果计一次，内部重试不另计）后发射合成事件 `hook/failed`，每条失败链只发一次；成功会清零计数并解除去抖。用普通 hook 接告警即可：
+
+```yaml
+config:
+  failedAlertThreshold: 3   # 可选，默认 3
+  hooks:
+    - on: 'hook/failed'
+      notify: { channel: 'desktop' }
+    - on: 'turn/end'
+      run: 'node my-hook.mjs'
+```
+
 - `turn/end` 的 hook 在运行中子代理计数解析完成后才派发，比其他事件晚一个异步跳——同会话紧随其后的事件（如下一轮 `turn/start`）可能先执行。
 
 `DSH_HOOK_RUNNING_SUBAGENTS` 的典型用法：后台子代理还在运行时抑制回合结束通知，只在本会话回合真正落定时才通知。注意父会话只会收到一次 `turn/end`（此时计数 > 0）；「全部落定」的信号由最后一个子会话自己的 `turn/end`（计数为 `0`）送达：

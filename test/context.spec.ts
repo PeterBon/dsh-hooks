@@ -204,3 +204,22 @@ describe('tree settled fields', () => {
     expect('DSH_HOOK_TREE_DURATION_MS' in env).toBe(false)
   })
 })
+
+describe('hook failed fields', () => {
+  it('maps the failing hook identity and count to environment variables', () => {
+    const env = toEnv({
+      event: 'hook/failed',
+      hookFailedHook: 'turn/end: node notify.mjs',
+      hookFailures: 3,
+      timestamp: 'T',
+    })
+    expect(env.DSH_HOOK_FAILED_HOOK).toBe('turn/end: node notify.mjs')
+    expect(env.DSH_HOOK_FAILURES).toBe('3')
+  })
+
+  it('omits the variables when absent', () => {
+    const env = toEnv({ event: 'turn/end', timestamp: 'T' })
+    expect('DSH_HOOK_FAILED_HOOK' in env).toBe(false)
+    expect('DSH_HOOK_FAILURES' in env).toBe(false)
+  })
+})

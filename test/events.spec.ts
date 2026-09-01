@@ -7,6 +7,7 @@ import {
   approvalContext,
   classifySessionEvent,
   errorText,
+  hookFailedContext,
   hookMatches,
   matchFilters,
   sessionCreatedContext,
@@ -336,6 +337,22 @@ describe('treeSettledContext', () => {
   it('carries the lineage metadata like other session contexts', () => {
     const ctx = treeSettledContext(fakeSession('s9'), 0, 0)
     expect(ctx).toMatchObject({ subagent: false, delegationDepth: 0 })
+  })
+})
+
+describe('hookFailedContext', () => {
+  it('builds the synthetic hook/failed context from the origin event', () => {
+    const origin = { event: 'turn/end', sessionId: 's7', sessionName: '构建脚本', cwd: 'D:\\work', timestamp: 'T' }
+    const ctx = hookFailedContext(origin, 'turn/end: node notify.mjs', 3)
+    expect(ctx).toMatchObject({
+      event: 'hook/failed',
+      sessionId: 's7',
+      sessionName: '构建脚本',
+      cwd: 'D:\\work',
+      hookFailedHook: 'turn/end: node notify.mjs',
+      hookFailures: 3,
+    })
+    expect(ctx.timestamp).toBeTypeOf('string')
   })
 })
 

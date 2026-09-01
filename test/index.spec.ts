@@ -53,6 +53,9 @@ function fakeChild() {
       ;(listeners[event] ??= []).push(cb)
       return child
     }),
+    emit(event: string, value?: unknown) {
+      for (const cb of listeners[event] ?? []) cb(value)
+    },
   }
   return child
 }
@@ -454,5 +457,170 @@ describe('tree/settled wiring', () => {
     await flush()
 
     expect(spawnMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('hook/failed alerts', () => {
+  const sessionObj = { id: 'session-main', header: { cwd: 'C:/tmp' }, events: [] }
+  const userMessageEvent = { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } } }
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+  const spawnEnv = (call: number) => {
+    const [, options] = spawnMock.mock.calls[call] as [string, { env: Record<string, string | undefined> }]
+    return options.env ?? {}
+  }
+  const failingChildren = () => {
+    const children: ReturnType<typeof fakeChild>[] = []
+    spawnMock.mockImplementation(() => {
+      const child = fakeChild()
+      children.push(child)
+      return child as never
+    })
+    return children
+  }
+
+  function wireAlerts(config: Parameters<typeof apply>[1]) {
+    const { ctx, listeners } = fakeCtx({})
+    apply(ctx, config)
+    return { emit: () => listeners.get('session/event')?.[0]?.(sessionObj, userMessageEvent) }
+  }
+
+  it('emits hook/failed after 3 consecutive non-zero exits and dedups the streak', () => {
+    const children = failingChildren()
+    const { emit } = wireAlerts({
+      hooks: [
+        { on: 'user/message', run: 'node -e ""' },
+        { on: 'hook/failed', run: 'node -e alert' },
+      ],
+      history: { enabled: false },
+    })
+
+    for (let i = 0; i < 3; i++) {
+      emit()
+      children[i]?.emit('close', 1)
+    }
+    // 3 failing runs + 1 alert emission.
+    expect(spawnMock).toHaveBeenCalledTimes(4)
+    const env = spawnEnv(3)
+    expect(env.DSH_HOOK_EVENT).toBe('hook/failed')
+    expect(env.DSH_HOOK_FAILED_HOOK).toContain('user/message')
+    expect(env.DSH_HOOK_FAILURES).toBe('3')
+
+    // Dedup: further failures keep counting but never re-emit.
+    emit()
+    children[3]?.emit('close', 1)
+    emit()
+    children[4]?.emit('close', 1)
+    expect(spawnMock).toHaveBeenCalledTimes(6)
+  })
+
+  it('resets the streak on success', () => {
+    const children = failingChildren()
+    const { emit } = wireAlerts({
+      hooks: [
+        { on: 'user/message', run: 'node -e ""' },
+        { on: 'hook/failed', run: 'node -e alert' },
+      ],
+      history: { enabled: false },
+    })
+
+    emit()
+    children[0]?.emit('close', 1)
+    emit()
+    children[1]?.emit('close', 1)
+    emit()
+    children[2]?.emit('close', 0) // success → reset
+    emit()
+    children[3]?.emit('close', 1)
+    emit()
+    children[4]?.emit('close', 1)
+    expect(spawnMock).toHaveBeenCalledTimes(5) // still no alert
+
+    emit()
+    children[5]?.emit('close', 1) // 3rd consecutive → alert
+    expect(spawnMock).toHaveBeenCalledTimes(7)
+    expect(spawnEnv(6).DSH_HOOK_EVENT).toBe('hook/failed')
+  })
+
+  it('counts spawn-failed outcomes', () => {
+    spawnMock.mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const { emit } = wireAlerts({
+        hooks: [
+          { on: 'user/message', run: 'node -e ""' },
+          { on: 'hook/failed', run: 'node -e alert' },
+        ],
+        history: { enabled: false },
+      })
+      emit()
+      emit()
+      emit()
+      expect(spawnMock).toHaveBeenCalledTimes(4) // 3 failed spawns + 1 alert
+      expect(spawnEnv(3).DSH_HOOK_EVENT).toBe('hook/failed')
+      expect(spawnEnv(3).DSH_HOOK_FAILURES).toBe('3')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('counts notify send-failed outcomes', async () => {
+    const { emit } = wireAlerts({
+      hooks: [
+        { on: 'user/message', notify: { channel: 'webhook' } }, // no URL → send-failed
+        { on: 'hook/failed', run: 'node -e alert' },
+      ],
+      history: { enabled: false },
+    })
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      for (let i = 0; i < 3; i++) {
+        emit()
+        await flush()
+      }
+      expect(spawnMock).toHaveBeenCalledOnce() // only the alert hook spawns
+      const env = spawnEnv(0)
+      expect(env.DSH_HOOK_EVENT).toBe('hook/failed')
+      expect(env.DSH_HOOK_FAILED_HOOK).toContain('notify:webhook')
+      expect(env.DSH_HOOK_FAILURES).toBe('3')
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('honors failedAlertThreshold from config', () => {
+    const children = failingChildren()
+    const { emit } = wireAlerts({
+      hooks: [
+        { on: 'user/message', run: 'node -e ""' },
+        { on: 'hook/failed', run: 'node -e alert' },
+      ],
+      failedAlertThreshold: 2,
+      history: { enabled: false },
+    })
+    emit()
+    children[0]?.emit('close', 1)
+    emit()
+    children[1]?.emit('close', 1)
+    expect(spawnMock).toHaveBeenCalledTimes(3)
+    expect(spawnEnv(2).DSH_HOOK_FAILURES).toBe('2')
+  })
+
+  it('clamps thresholds below 1 to 1', () => {
+    const children = failingChildren()
+    const { emit } = wireAlerts({
+      hooks: [
+        { on: 'user/message', run: 'node -e ""' },
+        { on: 'hook/failed', run: 'node -e alert' },
+      ],
+      failedAlertThreshold: 0,
+      history: { enabled: false },
+    })
+    emit()
+    children[0]?.emit('close', 1)
+    expect(spawnMock).toHaveBeenCalledTimes(2) // first failure already alerts
+    expect(spawnEnv(1).DSH_HOOK_FAILURES).toBe('1')
   })
 })

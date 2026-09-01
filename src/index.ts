@@ -9,6 +9,7 @@ import {
   agentStatusContext,
   classifySessionEvent,
   clearTurnTracking,
+  hookFailedContext,
   hookMatches,
   matchFilters,
   sessionCreatedContext,
@@ -22,7 +23,7 @@ import {
 import { eventLabel, type HookContext } from './context.js'
 import { createHookRunner } from './runner.js'
 import { fireNotify } from './notify.js'
-import { createHistorySink, type HistorySink } from './history.js'
+import { createHistorySink, type HistorySink, type HookRunRecord } from './history.js'
 import { createFeishuSetupManager } from './feishu-session.js'
 import { registerHookRoutes, type WebServerLike } from './server.js'
 
@@ -122,7 +123,7 @@ export { createHistorySink } from './history.js'
  * exists (web profile). Tells agents the plugin exists and how to cooperate.
  */
 export const DSH_HOOKS_GUIDANCE =
-  '本机已安装 dsh-hooks 插件（DeepSeek Harness 配置驱动生命周期 hooks）：可在 profile 的 cordis.patch.yml 声明「事件 → 命令/通知」的 hook（turn/start、turn/end、tree/settled、step/end、tool/call、tool/result、user/message、approval/asked、approval/decided、session/title、session/created、session/disposed、agent/created、agent/disposed、agent/error、agent/status 共 16 类事件），支持 when 原因过滤、match 字段正则过滤、stdin JSON 输入、opt-in 重试、内置 webhook/desktop 通知渠道；执行历史记录于 ~/.dsh/dsh-hooks/history.jsonl；`dsh-hooks dry-run <event>` 可模拟事件验证配置。用户提到「hooks / 钩子 / 生命周期 / 通知配置」时即指本插件，请据此协作。'
+  '本机已安装 dsh-hooks 插件（DeepSeek Harness 配置驱动生命周期 hooks）：可在 profile 的 cordis.patch.yml 声明「事件 → 命令/通知」的 hook（turn/start、turn/end、tree/settled、step/end、tool/call、tool/result、user/message、approval/asked、approval/decided、session/title、session/created、session/disposed、agent/created、agent/disposed、agent/error、agent/status、hook/failed 共 17 类事件），支持 when 原因过滤、match 字段正则过滤、stdin JSON 输入、opt-in 重试、内置 webhook/desktop 通知渠道；执行历史记录于 ~/.dsh/dsh-hooks/history.jsonl；`dsh-hooks dry-run <event>` 可模拟事件验证配置。用户提到「hooks / 钩子 / 生命周期 / 通知配置」时即指本插件，请据此协作。'
 
 export function apply(ctx: Context, config: Config = {}) {
   const hooks: readonly HookSpec[] = config.hooks ?? []
@@ -157,20 +158,58 @@ export function apply(ctx: Context, config: Config = {}) {
     )
   }
 
+  // Consecutive failure tracking for the synthetic hook/failed alert: a hook
+  // that keeps failing is dead automation, and fire-and-forget dispatch would
+  // otherwise let it rot silently. Counters are keyed by hook index, reset on
+  // success, and the alert fires once per streak (dedup until a success).
+  const failureThreshold = Math.max(1, config.failedAlertThreshold ?? 3)
+  const failures = new Map<number, number>()
+  const alerted = new Set<number>()
+
+  /** One-line identity of a hook for failure alerts. */
+  function hookFailureSummary(hook: HookSpec): string {
+    const when = hook.when ? `/${hook.when}` : ''
+    const action = hook.run ? hook.run : hook.notify ? `notify:${hook.notify.channel}` : '(既无 run 也无 notify)'
+    return `${hook.on}${when}: ${action}`.slice(0, 200)
+  }
+
   const runMatching = (ctxValue: HookContext, reasonKind?: TurnEndReasonKind): void => {
-    for (const hook of hooks) {
-      if (!hookMatches(hook, ctxValue.event, reasonKind)) continue
-      if (!matchFilters(hook.match, ctxValue)) continue
+    hooks.forEach((hook, index) => {
+      if (!hookMatches(hook, ctxValue.event, reasonKind)) return
+      if (!matchFilters(hook.match, ctxValue)) return
+      // Attribute every outcome record to this hook identity so the failure
+      // streak below sees the full run/notify lifecycle (retries included).
+      const track = (record: Omit<HookRunRecord, 'ts'>): void => {
+        history.record(record)
+        const failed =
+          record.outcome === 'spawn-failed' ||
+          record.outcome === 'exit-nonzero' ||
+          record.outcome === 'timeout' ||
+          record.outcome === 'send-failed'
+        if (failed) {
+          const count = (failures.get(index) ?? 0) + 1
+          failures.set(index, count)
+          if (count >= failureThreshold && !alerted.has(index)) {
+            alerted.add(index)
+            runMatching(hookFailedContext(ctxValue, hookFailureSummary(hook), count))
+          }
+          return
+        }
+        if (record.outcome === 'exit-0' || record.outcome === 'sent') {
+          failures.delete(index)
+          alerted.delete(index)
+        }
+      }
       if (hook.notify) {
-        void fireNotify(hook.notify, ctxValue, (record) => history.record(record))
-        continue
+        void fireNotify(hook.notify, ctxValue, track)
+        return
       }
       if (hook.run) {
-        runner.run(hook, ctxValue)
-        continue
+        runner.run(hook, ctxValue, track)
+        return
       }
       console.warn(`[dsh-hooks] hook 既没有 run 也没有 notify，已跳过：${eventLabel(ctxValue)}`)
-    }
+    })
   }
 
   // turn/end: fill the live running-subagent count before dispatching hooks,

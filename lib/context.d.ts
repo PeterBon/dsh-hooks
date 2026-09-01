@@ -60,6 +60,10 @@ export interface HookContext {
     totalSubagents?: number;
     /** Parent turn/end → tree settle duration, ms (tree/settled). */
     treeDurationMs?: number;
+    /** Identity summary of the hook that failed consecutively (hook/failed). */
+    hookFailedHook?: string;
+    /** Consecutive failure count when the alert fired (hook/failed). */
+    hookFailures?: number;
     timestamp: string;
 }
 export declare function toEnv(ctx: HookContext): Record<string, string>;
