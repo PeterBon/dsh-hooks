@@ -271,4 +271,47 @@ describe('createHookRunner', () => {
     runner.dispose()
     expect(runner.stats().inFlight).toBe(0)
   })
+
+  it('routes outcome records to the per-run override instead of the shared sink', () => {
+    const shared: Array<{ outcome: string }> = []
+    const overridden: Array<{ outcome: string }> = []
+    const runner = createHookRunner(console.log, (record) => shared.push(record))
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+
+    runner.run({ on: 'turn/start', run: 'x' }, { event: 'turn/start', timestamp: 'T' }, (record) => overridden.push(record))
+    fakeChildRef.emit('close', 0)
+
+    expect(overridden.map((r) => r.outcome)).toEqual(['spawned', 'exit-0'])
+    expect(shared).toHaveLength(0)
+  })
+
+  it('threads the override through retried attempts', () => {
+    vi.useFakeTimers()
+    try {
+      const overridden: Array<{ outcome: string }> = []
+      const runner = createHookRunner()
+      const children: ReturnType<typeof fakeChild>[] = []
+      spawnMock.mockImplementation(() => {
+        const child = fakeChild()
+        children.push(child)
+        return child as never
+      })
+
+      runner.run(
+        { on: 'turn/start', run: 'x', retries: 1, retryDelayMs: 100 },
+        { event: 'turn/start', timestamp: 'T' },
+        (record) => overridden.push(record),
+      )
+      children[0]?.emit('close', 1)
+      vi.advanceTimersByTime(100)
+      children[1]?.emit('close', 0)
+
+      // Intermediate retry attempts record nothing; the final outcome is
+      // the logical run's result (failure counting treats one run as one).
+      expect(overridden.map((r) => r.outcome)).toEqual(['spawned', 'spawned', 'exit-0'])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

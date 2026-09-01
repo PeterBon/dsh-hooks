@@ -425,6 +425,24 @@ export function treeSettledContext(session: Session, totalSubagents: number, tre
   }
 }
 
+/**
+ * Synthetic `hook/failed` context: one hook failed consecutively past the
+ * alert threshold. Emitted by index.ts from the runner/history outcome
+ * stream, not classified from a session log event; `origin` supplies the
+ * session identity of the event that triggered the failing hook.
+ */
+export function hookFailedContext(origin: HookContext, hookFailedHook: string, hookFailures: number): HookContext {
+  return {
+    event: 'hook/failed',
+    sessionId: origin.sessionId,
+    sessionName: origin.sessionName,
+    cwd: origin.cwd,
+    hookFailedHook,
+    hookFailures,
+    timestamp: new Date().toISOString(),
+  }
+}
+
 export function agentCreatedContext(agent: AgentLike): HookContext {
   return {
     event: 'agent/created',

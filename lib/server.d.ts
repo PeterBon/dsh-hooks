@@ -48,7 +48,7 @@ export interface HookRoutesOptions {
 /** Sanitized per-hook description for the settings panel (regex sources, no RegExp objects). */
 export declare function describeHooks(hooks: readonly HookSpec[]): {
     index: number;
-    on: "agent/created" | "agent/disposed" | "agent/error" | "agent/status" | "approval/asked" | "approval/decided" | "session/created" | "session/disposed" | "session/title" | "step/end" | "tool/call" | "tool/result" | "tree/settled" | "turn/end" | "turn/start" | "user/message";
+    on: "agent/created" | "agent/disposed" | "agent/error" | "agent/status" | "approval/asked" | "approval/decided" | "hook/failed" | "session/created" | "session/disposed" | "session/title" | "step/end" | "tool/call" | "tool/result" | "tree/settled" | "turn/end" | "turn/start" | "user/message";
     when: "aborted" | "blocked" | "completed" | "error" | "interrupted" | "max-tokens" | undefined;
     match: {
         [k: string]: string;

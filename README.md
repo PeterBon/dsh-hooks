@@ -90,6 +90,7 @@ Every hook field:
 | `agent/disposed` | An agent leaves the registry | session id |
 | `agent/error` | The agent loop reports an error | error text |
 | `agent/status` | Agent status transition | status |
+| `hook/failed` | A hook fails consecutively past `failedAlertThreshold` (default 3; synthetic, emitted from the outcome stream) | failing hook summary, consecutive failure count |
 
 The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `error`, …). Hooks for other events run unconditionally.
 
@@ -131,9 +132,22 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_APPROVAL_OUTCOME` | approval decision outcome (`approval/decided`) |
 | `DSH_HOOK_TOTAL_SUBAGENTS` | total subagents in the settled tree (`tree/settled`) |
 | `DSH_HOOK_TREE_DURATION_MS` | parent turn/end → tree settle duration, ms (`tree/settled`) |
+| `DSH_HOOK_FAILED_HOOK` | identity summary of the hook that failed consecutively (`hook/failed`) |
+| `DSH_HOOK_FAILURES` | consecutive failure count when the alert fired (`hook/failed`) |
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.
+- Failure alerts: fire-and-forget hooks fail silently by design, so the plugin also watches the outcome stream. When one hook fails `failedAlertThreshold` consecutive times (`spawn-failed` / `exit-nonzero` / `timeout` / `send-failed`; one logical run's final outcome counts once, internal retries don't add extra counts), the synthetic `hook/failed` event fires once per streak — a success resets both the counter and the dedup. Alert with a normal hook:
+
+```yaml
+config:
+  failedAlertThreshold: 3   # optional, default 3
+  hooks:
+    - on: 'hook/failed'
+      notify: { channel: 'desktop' }
+    - on: 'turn/end'
+      run: 'node my-hook.mjs'
+```
 - `turn/end` hooks are dispatched after the running-subagent count resolves, i.e. one async hop later than other events — an immediately following event from the same session (e.g. the next `turn/start`) may dispatch first.
 
 A common use for `DSH_HOOK_RUNNING_SUBAGENTS` is suppressing the end-of-turn notification while background subagents are still working and only notifying once a turn settles with nothing left running. Note the parent session emits `turn/end` exactly once (with the count > 0); the "everything settled" signal arrives as `turn/end` on the last child session, whose count is `0`:

@@ -1,5 +1,5 @@
 /** Hookable event kinds. v1 is emit-only: no waterfall/interception events. */
-export declare const HOOK_EVENTS: readonly ['turn/start', 'turn/end', 'tree/settled', 'step/end', 'tool/call', 'tool/result', 'user/message', 'approval/asked', 'approval/decided', 'session/title', 'session/created', 'session/disposed', 'agent/created', 'agent/disposed', 'agent/error', 'agent/status'];
+export declare const HOOK_EVENTS: readonly ['turn/start', 'turn/end', 'tree/settled', 'step/end', 'tool/call', 'tool/result', 'user/message', 'approval/asked', 'approval/decided', 'session/title', 'session/created', 'session/disposed', 'agent/created', 'agent/disposed', 'agent/error', 'agent/status', 'hook/failed'];
 export type HookEvent = (typeof HOOK_EVENTS)[number];
 /** `turn/end` reason kinds (from @deepseek-ai/dsh-session TurnEndReasonMap). */
 export declare const TURN_END_REASONS: readonly ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted'];
@@ -68,6 +68,13 @@ export interface HistoryConfig {
 export interface Config {
     hooks?: HookSpec[];
     history?: HistoryConfig | null;
+    /**
+     * Consecutive failure count (spawn-failed / exit-nonzero / timeout /
+     * send-failed; one logical run counts once, internal retries included)
+     * that emits the synthetic `hook/failed` event. Defaults to 3; values
+     * below 1 are clamped to 1.
+     */
+    failedAlertThreshold?: number;
 }
 export declare const Config: {
     (data?: Config | null): Config;

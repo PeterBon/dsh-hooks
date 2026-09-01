@@ -9,7 +9,7 @@ export interface RunOutcome {
 }
 /** Track in-flight hook runs so a missing parent never outlives teardown. */
 export interface HookRunner {
-    run(spec: HookSpec, ctx: HookContext): RunOutcome;
+    run(spec: HookSpec, ctx: HookContext, recordOverride?: RunRecord): RunOutcome;
     /** Live counters for the web-panel diagnostics. */
     stats(): HookRunnerStats;
     dispose(): void;

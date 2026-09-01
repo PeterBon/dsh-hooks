@@ -119,6 +119,13 @@ export declare function approvalDecidedContext(session: Session, data: ApprovalD
  * off. Emitted by index.ts, not classified from a session log event.
  */
 export declare function treeSettledContext(session: Session, totalSubagents: number, treeDurationMs: number): HookContext;
+/**
+ * Synthetic `hook/failed` context: one hook failed consecutively past the
+ * alert threshold. Emitted by index.ts from the runner/history outcome
+ * stream, not classified from a session log event; `origin` supplies the
+ * session identity of the event that triggered the failing hook.
+ */
+export declare function hookFailedContext(origin: HookContext, hookFailedHook: string, hookFailures: number): HookContext;
 export declare function agentCreatedContext(agent: AgentLike): HookContext;
 export declare function agentDisposedContext(agent: AgentLike): HookContext;
 export declare function agentErrorContext(agent: AgentLike, turn: number | undefined, error: unknown): HookContext;
