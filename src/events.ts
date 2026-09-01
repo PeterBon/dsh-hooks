@@ -245,6 +245,9 @@ export function turnEndContext(session: Session, turn: number, reason: TurnEndRe
     usageCacheReadTokens: usage?.cacheReadTokens,
     usageCacheWriteTokens: usage?.cacheWriteTokens,
     usageReasoningTokens: usage?.reasoningTokens,
+    // Default until index.ts fills the live count from the agents/subagents
+    // services (0 = no subagent running under this session).
+    runningSubagents: 0,
   }
 }
 

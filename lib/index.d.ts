@@ -3,6 +3,42 @@ import './types.js';
 import { Config } from './config.js';
 import { clearTurnTracking } from './events.js';
 export declare const name = "dsh-hooks";
+/** Minimal structural contract of the optional `agents` service. */
+interface AgentsLike {
+    get(id: string): {
+        id: string;
+        status: string;
+    } | undefined;
+    list(): Array<{
+        id: string;
+        status: string;
+    }>;
+    isOwnedBy(id: string, owner: {
+        id: string;
+    }): boolean;
+}
+/** Minimal structural contract of the optional `subagents` service. */
+interface SubagentsLike {
+    listDescendants(rootSessionId: string): Promise<Array<{
+        id?: string;
+    }>>;
+}
+/**
+ * Count live agents still running in one session's descendant subagent tree.
+ *
+ * Lineage comes from the durable session tree (`subagents.listDescendants`,
+ * driven by the session header `parentSession`): a subagent's runtime owner
+ * in the agents registry is the subagent manager's host-level scope, not the
+ * parent agent, so ownership chains (`agents.isOwnedBy`) cannot find children.
+ * Only agents whose live status is `running` count — a settled/idle
+ * continuable child no longer suppresses the turn/end notification. Returns 0
+ * when the session has no live agent or the services are unavailable.
+ *
+ * The live-registry scan is strictly a fallback for when listing is
+ * unavailable (service absent or listing threw): a successful empty listing
+ * stays empty, so ordinary subagent-free turns don't pay an O(registry) scan.
+ */
+export declare function countRunningSubagents(agents: AgentsLike, subagents: SubagentsLike | undefined, sessionId: string | undefined): Promise<number>;
 export declare const inject: readonly ['sessions'];
 export { Config };
 export { hookMatches, matchFilters } from './events.js';
@@ -15,4 +51,5 @@ export declare const DSH_HOOKS_GUIDANCE = "\u672C\u673A\u5DF2\u5B89\u88C5 dsh-ho
 export declare function apply(ctx: Context, config?: Config): void;
 export declare const _internals: {
     clearTurnTracking: typeof clearTurnTracking;
+    countRunningSubagents: typeof countRunningSubagents;
 };

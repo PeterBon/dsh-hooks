@@ -36,6 +36,12 @@ export interface HookContext {
     usageCacheReadTokens?: number;
     usageCacheWriteTokens?: number;
     usageReasoningTokens?: number;
+    /**
+     * Number of live subagents still running under this session at `turn/end`
+     * (0 = none). Always present on `turn/end`; the plugin fills the real count
+     * from the agents/subagents services when they are available.
+     */
+    runningSubagents?: number;
     timestamp: string;
 }
 export declare function toEnv(ctx: HookContext): Record<string, string>;

@@ -120,3 +120,20 @@ describe('eventLabel', () => {
     expect(label).toContain('pwsh')
   })
 })
+
+describe('runningSubagents', () => {
+  it('stringifies the running-subagents count on turn/end', () => {
+    const env = toEnv({ event: 'turn/end', runningSubagents: 2, timestamp: 'T' })
+    expect(env.DSH_HOOK_RUNNING_SUBAGENTS).toBe('2')
+  })
+
+  it('carries zero explicitly when provided', () => {
+    const env = toEnv({ event: 'turn/end', runningSubagents: 0, timestamp: 'T' })
+    expect(env.DSH_HOOK_RUNNING_SUBAGENTS).toBe('0')
+  })
+
+  it('omits the variable when the count is absent', () => {
+    const env = toEnv({ event: 'turn/end', timestamp: 'T' })
+    expect('DSH_HOOK_RUNNING_SUBAGENTS' in env).toBe(false)
+  })
+})

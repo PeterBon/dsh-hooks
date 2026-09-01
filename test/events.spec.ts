@@ -187,6 +187,11 @@ describe('turnEndContext enrichment', () => {
     expect(ctx).toMatchObject({ event: 'turn/end', reason: 'aborted', turn: 2 })
   })
 
+  it('always carries runningSubagents on turn/end (default 0 until index fills it)', () => {
+    const ctx = turnEndContext(fakeSession('s2'), 1, 'completed')
+    expect(ctx.runningSubagents).toBe(0)
+  })
+
   it('classifySessionEvent forwards the full reason to turnEndContext', () => {
     const session = fakeSession('s2')
     classifySessionEvent(session, sessionEvent('turn/start', { turn: 1 }))
