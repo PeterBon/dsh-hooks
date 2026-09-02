@@ -314,4 +314,103 @@ describe('createHookRunner', () => {
       vi.useRealTimers()
     }
   })
+
+  it('spawns in the session cwd when cwd is session', () => {
+    const runner = createHookRunner()
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+    runner.run(
+      { on: 'step/end', run: 'x', cwd: 'session' },
+      { event: 'step/end', cwd: 'D:\\work\\demo', timestamp: 'T' },
+    )
+    const [, options] = spawnMock.mock.calls[0] as [string, { cwd?: string }]
+    expect(options.cwd).toBe('D:\\work\\demo')
+  })
+
+  it('falls back to the plugin process cwd when the session cwd is unknown', () => {
+    const runner = createHookRunner()
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+    runner.run({ on: 'step/end', run: 'x', cwd: 'session' }, { event: 'step/end', timestamp: 'T' })
+    const [, options] = spawnMock.mock.calls[0] as [string, { cwd?: string }]
+    expect(options.cwd).toBe(process.cwd())
+  })
+
+  it('spawns in an absolute path cwd verbatim, and leaves cwd unset by default', () => {
+    const runner = createHookRunner()
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+    runner.run({ on: 'step/end', run: 'x', cwd: 'C:\\tools' }, { event: 'step/end', timestamp: 'T' })
+    const [, options] = spawnMock.mock.calls[0] as [string, { cwd?: string }]
+    expect(options.cwd).toBe('C:\\tools')
+
+    runner.run({ on: 'step/end', run: 'x' }, { event: 'step/end', timestamp: 'T' })
+    const [, plain] = spawnMock.mock.calls[1] as [string, { cwd?: string }]
+    expect(plain.cwd).toBeUndefined()
+  })
+
+  it('drops runs beyond maxConcurrent and records skipped', () => {
+    const records: Array<{ outcome: string }> = []
+    const runner = createHookRunner(console.log, (r) => records.push(r))
+    const children: ReturnType<typeof fakeChild>[] = []
+    spawnMock.mockImplementation(() => {
+      const child = fakeChild()
+      children.push(child)
+      return child as never
+    })
+    const limiter = { id: 'hook:0', max: 1 }
+    const ctx = { event: 'step/end', timestamp: 'T' }
+    const spec = { on: 'step/end', run: 'x' }
+
+    expect(runner.run(spec, ctx, (r) => records.push(r), limiter)).toEqual({ ok: true, reason: 'ran' })
+    const second: Array<{ outcome: string; error?: string }> = []
+    const outcome = runner.run(spec, ctx, (r) => second.push(r), limiter)
+    expect(outcome).toMatchObject({ ok: false, reason: 'skipped' })
+    expect(second[0]?.outcome).toBe('skipped')
+    expect(second[0]?.error).toContain('maxConcurrent')
+
+    // The slot releases when the first logical run reaches a terminal outcome.
+    children[0]?.emit('close', 0)
+    expect(runner.run(spec, ctx, (r) => records.push(r), limiter)).toEqual({ ok: true, reason: 'ran' })
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps the limiter slot occupied across retries', () => {
+    vi.useFakeTimers()
+    try {
+      const runner = createHookRunner()
+      const children: ReturnType<typeof fakeChild>[] = []
+      spawnMock.mockImplementation(() => {
+        const child = fakeChild()
+        children.push(child)
+        return child as never
+      })
+      const limiter = { id: 'hook:0', max: 1 }
+      const ctx = { event: 'step/end', timestamp: 'T' }
+      const spec = { on: 'step/end', run: 'x', retries: 1, retryDelayMs: 100 }
+
+      runner.run(spec, ctx, undefined, limiter)
+      children[0]?.emit('close', 1) // retry scheduled — the slot stays held
+      expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: false, reason: 'skipped' })
+      vi.advanceTimersByTime(100) // retry spawn
+      expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: false, reason: 'skipped' })
+      children[1]?.emit('close', 0) // logical run finished
+      expect(runner.run(spec, ctx, undefined, limiter)).toEqual({ ok: true, reason: 'ran' })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('releases the limiter slot when spawn fails', () => {
+    const runner = createHookRunner()
+    spawnMock.mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+    const limiter = { id: 'hook:0', max: 1 }
+    const ctx = { event: 'step/end', timestamp: 'T' }
+    const spec = { on: 'step/end', run: 'x' }
+    expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: false, reason: 'spawn-failed' })
+    expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: false, reason: 'spawn-failed' })
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
 })

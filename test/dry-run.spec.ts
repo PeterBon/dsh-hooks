@@ -104,6 +104,19 @@ describe('evaluateHooks', () => {
     const nonSsh = mockContext('tool/call', { tool: 'read' })
     expect(evaluateHooks(hooks, 'tool/call', nonSsh).map((l) => l.matched)).toEqual([false, false, true, false])
   })
+
+  it('explains enabled: false hooks', () => {
+    const disabled = [{ on: 'turn/end', run: 'x', enabled: false }] as HookSpec[]
+    const lines = evaluateHooks(disabled, 'turn/end', ctx, 'completed')
+    expect(lines[0].matched).toBe(false)
+    expect(lines[0].why).toContain('enabled: false')
+  })
+
+  it('evaluates numeric match filters in dry-run', () => {
+    const numeric = [{ on: 'tool/result', match: { toolDurationMs: { gt: 10000 } }, run: 'x' }] as HookSpec[]
+    expect(evaluateHooks(numeric, 'tool/result', mockContext('tool/result', { toolDurationMs: 15000 }))[0].matched).toBe(true)
+    expect(evaluateHooks(numeric, 'tool/result', mockContext('tool/result', { toolDurationMs: 500 }))[0].matched).toBe(false)
+  })
 })
 
 describe('describeHook', () => {
@@ -111,6 +124,16 @@ describe('describeHook', () => {
     expect(describeHook({ on: 'turn/end', when: 'completed', run: 'echo hi' })).toBe('[turn/end when=completed] run: echo hi')
     expect(describeHook({ on: 'approval/asked', notify: { channel: 'desktop' } })).toBe('[approval/asked] notify: desktop')
     expect(describeHook({ on: 'tool/call', match: { tool: /^pw/ }, run: 'x' })).toContain('"tool":"^pw"')
+  })
+
+  it('renders execution options and numeric match values', () => {
+    const summary = describeHook({ on: 'step/end', run: 'x', cwd: 'session', maxConcurrent: 2, debounceMs: 250 })
+    expect(summary).toContain('cwd:session')
+    expect(summary).toContain('maxConcurrent:2')
+    expect(summary).toContain('debounceMs:250')
+    expect(describeHook({ on: 'step/end', run: 'x', enabled: false })).toContain('enabled:false')
+    expect(describeHook({ on: 'tool/result', match: { toolDurationMs: { gt: 10000 } }, run: 'x' })).toContain('"toolDurationMs":"{\\"gt\\":10000}"')
+    expect(describeHook({ on: 'tool/result', match: { toolDurationMs: />10000/ }, run: 'x' })).toContain('">10000"')
   })
 })
 

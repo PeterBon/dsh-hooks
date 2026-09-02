@@ -106,6 +106,20 @@ export interface HookRoutesOptions {
   resolvePatchFile?: (profile: string) => string
 }
 
+/** Render a match value for the panel: regex source or comparison string. */
+function matchText(value: RegExp | { gt?: number; gte?: number; lt?: number; lte?: number; eq?: number }): string {
+  if (value instanceof RegExp) return value.source
+  // Normalize single-op objects to the equivalent string syntax so the
+  // editor round-trip keeps comparison semantics; multi-op stays JSON.
+  const ops = Object.entries(value)
+  if (ops.length === 1) {
+    const [op, n] = ops[0]
+    const symbol = { gt: '>', gte: '>=', lt: '<', lte: '<=', eq: '=' }[op]
+    if (symbol !== undefined && typeof n === 'number') return `${symbol}${n}`
+  }
+  return JSON.stringify(value)
+}
+
 /** Sanitized per-hook description for the settings panel (regex sources, no RegExp objects). */
 export function describeHooks(hooks: readonly HookSpec[]) {
   return hooks.map((hook, i) => ({
@@ -115,7 +129,7 @@ export function describeHooks(hooks: readonly HookSpec[]) {
     match:
       hook.match === undefined
         ? undefined
-        : Object.fromEntries(Object.entries(hook.match).map(([field, re]) => [field, re.source])),
+        : Object.fromEntries(Object.entries(hook.match).map(([field, re]) => [field, matchText(re)])),
     run: hook.run,
     notify:
       hook.notify === undefined || hook.notify === null
@@ -125,6 +139,10 @@ export function describeHooks(hooks: readonly HookSpec[]) {
     timeoutMs: hook.timeoutMs,
     retries: hook.retries,
     retryDelayMs: hook.retryDelayMs,
+    enabled: hook.enabled,
+    cwd: hook.cwd,
+    maxConcurrent: hook.maxConcurrent,
+    debounceMs: hook.debounceMs,
   }))
 }
 

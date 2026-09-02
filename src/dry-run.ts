@@ -73,16 +73,28 @@ export interface DryRunLine {
   summary: string
 }
 
+/** Render a match value (regex source, comparison op, or object form). */
+function matchText(value: RegExp | { gt?: number; gte?: number; lt?: number; lte?: number; eq?: number }): string {
+  if (value instanceof RegExp) return value.source
+  return JSON.stringify(value)
+}
+
 /** One-line hook description for report rows. */
 export function describeHook(hook: HookSpec): string {
   const when = hook.when ? ` when=${hook.when}` : ''
   const match =
     hook.match && Object.keys(hook.match).length > 0
-      ? ` match=${JSON.stringify(Object.fromEntries(Object.entries(hook.match).map(([key, re]) => [key, re.source])))},`
+      ? ` match=${JSON.stringify(Object.fromEntries(Object.entries(hook.match).map(([key, re]) => [key, matchText(re)])))},`
       : ''
-  if (hook.run) return `[${hook.on}${when}]${match} run: ${hook.run}`
-  if (hook.notify) return `[${hook.on}${when}]${match} notify: ${hook.notify.channel}${hook.notify.url ? ` ${hook.notify.url}` : ''}`
-  return `[${hook.on}${when}]${match} (既无 run 也无 notify)`
+  const options = [
+    hook.enabled === false ? ' enabled:false' : '',
+    hook.cwd !== undefined ? ` cwd:${hook.cwd}` : '',
+    hook.maxConcurrent !== undefined && hook.maxConcurrent > 0 ? ` maxConcurrent:${hook.maxConcurrent}` : '',
+    hook.debounceMs !== undefined && hook.debounceMs > 0 ? ` debounceMs:${hook.debounceMs}` : '',
+  ].join('')
+  if (hook.run) return `[${hook.on}${when}]${match} run: ${hook.run}${options}`
+  if (hook.notify) return `[${hook.on}${when}]${match} notify: ${hook.notify.channel}${hook.notify.url ? ` ${hook.notify.url}` : ''}${options}`
+  return `[${hook.on}${when}]${match} (既无 run 也无 notify)${options}`
 }
 
 /** Evaluate every hook against the simulated event/context. */
@@ -94,6 +106,9 @@ export function evaluateHooks(
 ): DryRunLine[] {
   return hooks.map((hook, index) => {
     const summary = describeHook(hook)
+    if (hook.enabled === false) {
+      return { index: index + 1, matched: false, why: 'enabled: false（已停用）', summary }
+    }
     if (hook.on !== event) {
       return { index: index + 1, matched: false, why: `事件不匹配（${hook.on} ≠ ${event}）`, summary }
     }

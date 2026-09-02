@@ -54,6 +54,18 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
           channel: 'webhook'         # POST JSON 到任意 HTTP 端点
           url: 'https://hooks.slack.com/services/…'
           slack: true                # 可选：改为 { text } 单行摘要（Slack 风格）
+      - on: 'step/end'
+        run: 'node examples/log-step.mjs'
+        debounceMs: 500              # 可选：高频事件去抖，窗口内合并为一次
+        maxConcurrent: 2             # 可选：并发上限，超出的触发被丢弃
+      - on: 'tool/result'
+        match:
+          toolDurationMs: '>10000'   # 数值比较（也支持 { gt: 10000 } 对象语法）
+        run: 'node examples/notify-slow-tool.mjs'
+      - on: 'turn/end'
+        enabled: false               # 可选：停用但不删除（跳过派发）
+        cwd: 'session'               # 可选：在会话工作目录执行
+        run: 'node examples/log-turn.mjs'
 ```
 
 每个 hook 的完整字段：
@@ -62,24 +74,28 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | --- | --- | --- |
 | `on` | 触发事件（见上方事件表） | 必填 |
 | `when` | 对 `turn/end` 按结束原因过滤 | 全部原因 |
-| `match` | 字段 → 正则，全部匹配才触发；字段为上下文键（`tool`/`sessionName`/`sessionId`/`error`/`source`/`cwd`/`content`/`reason`…），上下文中不存在的字段视为不匹配 | 不过滤 |
+| `match` | 字段 → 正则或数值比较，全部匹配才触发；字段为上下文键（`tool`/`sessionName`/`sessionId`/`error`/`source`/`cwd`/`content`/`reason`/`turn`/`durationMs`/`toolDurationMs`…），上下文中不存在的字段视为不匹配。正则匹配字段的字符串表示；数值比较（`{ gt: 10000 }` 或 `'>10000'`，支持 `gt`/`gte`/`lt`/`lte`/`eq` 组合）只对数字字段生效，非数字字段上的比较永不匹配 | 不过滤 |
 | `run` | 通过系统 shell 执行的命令（与 `notify` 二选一） | 二选一必填 |
 | `notify` | 内置通知（与 `run` 二选一）：`channel: webhook`（HTTP JSON，`url` 可省略用 `DSH_HOOKS_WEBHOOK_URL`，`slack: true` 换单行摘要）或 `channel: desktop`（系统气泡/toast） | 二选一必填 |
 | `input` | `env` 只传 `DSH_HOOK_*` 环境变量；`stdin` 额外把完整上下文 JSON 写入命令标准输入 | `env` |
 | `timeoutMs` | 单次执行超时（毫秒），超时终止进程树 | 10000 |
 | `retries` | 非零退出码的重试次数（spawn 失败与超时不重试） | 0 |
 | `retryDelayMs` | 重试基础间隔（毫秒），每次翻倍 | 500 |
+| `enabled` | `false` 停用该 hook：配置保留、静默跳过派发（不计入失败） | `true` |
+| `cwd` | 命令执行目录：`session` 在会话工作目录执行；绝对路径在指定目录执行（只作用于 `run`） | 插件进程目录 |
+| `maxConcurrent` | 该 hook 允许的最大并发进程数；超出的触发被丢弃（执行历史记 `skipped`） | 不限 |
+| `debounceMs` | 去抖窗口（毫秒）：高频事件（`step/end`、`tool/*`…）窗口内的多次触发合并为一次 trailing 执行，携带最新上下文 | 0（不去抖） |
 
 ## 事件（v1）
 
 | 事件 | 触发时机 | 有用上下文 |
 | --- | --- | --- |
-| `turn/start` | 回合开始 | 会话 id、回合号 |
+| `turn/start` | 回合开始（若有 `turn/start` hook，派发延迟到本回合的首条用户消息分类后，把触发文本注入 `DSH_HOOK_CONTENT`；无用户消息的回合在 `turn/end` 时无内容派发，见下方说明） | 会话 id、回合号、触发消息文本 |
 | `turn/end` | 回合结束（`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`） | reason、回合号、耗时、内容、本回合 token 用量、运行中子代理数 |
 | `tree/settled` | 回合结束后把工作交给子代理的会话，其整个子代理树全部落定（无存活子代理仍在运行） | 子代理总数、交接到落定的耗时 |
 | `step/end` | 回合内一步结束（一次模型调用 + 其工具执行） | 回合号、步号 |
 | `tool/call` | 模型请求一次工具调用 | 工具名、调用 id、原始参数 JSON |
-| `tool/result` | 工具调用完成 | 工具名（自动反查）、结果文本、失败标识 |
+| `tool/result` | 工具调用完成 | 工具名（自动反查）、结果文本、失败标识、工具耗时（配对失败时无耗时） |
 | `user/message` | 会话表面出现用户角色消息 | 来源 kind（`user` / `plugin` / …）、消息文本 |
 | `approval/asked` | 工具调用请求用户审批 | 工具名、调用 id、审批 id、原因 |
 | `approval/decided` | 待审批项得出结果（与 `approval/asked` 按 id 配对） | 结果 outcome、工具名（自动反查）、调用 id、审批 id |
@@ -112,11 +128,12 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_CALL_ID` | 工具调用 id（审批 / 工具事件） |
 | `DSH_HOOK_TOOL_ARGS` | 工具原始参数 JSON（tool/call） |
 | `DSH_HOOK_TOOL_ERROR` | 工具失败标识 `名称: 代码`（tool/result 出错时） |
+| `DSH_HOOK_TOOL_DURATION_MS` | 工具执行耗时毫秒（tool/result；配对 tool/call 丢失时无此变量） |
 | `DSH_HOOK_SOURCE` | 消息 / 标题来源 kind（`user`、`plugin`、`fallback`、`provider`…） |
 | `DSH_HOOK_DURATION_MS` | 回合耗时毫秒（turn/end） |
 | `DSH_HOOK_STATUS` | Agent 状态（agent/status） |
 | `DSH_HOOK_ERROR` | 错误文本（agent/error，以及 turn/end 出错时的失败详情） |
-| `DSH_HOOK_CONTENT` | 事件内容快照：回合最后助手文本、工具结果文本、用户消息文本 |
+| `DSH_HOOK_CONTENT` | 事件内容快照：回合最后助手文本、工具结果文本、用户消息文本、回合触发消息文本（turn/start） |
 | `DSH_HOOK_USAGE_INPUT_TOKENS` | 本回合输入 token 总量（turn/end，逐 step 聚合） |
 | `DSH_HOOK_USAGE_OUTPUT_TOKENS` | 本回合输出 token 总量 |
 | `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | 本回合缓存读 token（有上报时） |
@@ -168,6 +185,62 @@ config:
 
 已落定但闲置（idle）的 continuable 子代理不计入运行中，不会一直压住通知。落定监视是事件驱动且 best-effort 的：插件重启后监视集合丢失；重查失败会静默放弃该监视（不会补发迟到的通知）。
 
+### match 数值比较
+
+对数字字段（`turn`、`step`、`durationMs`、`toolDurationMs`、`usage*`、`runningSubagents`…）可以直接写数值比较，不用绕正则：
+
+```yaml
+- on: 'tool/result'
+  match: { toolDurationMs: '>10000' }   # 字符串语法：> >= < <= =
+  run: 'node examples/notify-slow-tool.mjs'
+
+- on: 'tool/result'
+  match:
+    toolDurationMs: { gt: 10000, lt: 60000 }   # 对象语法：gt/gte/lt/lte/eq 可组合
+  run: 'node examples/notify-slow-tool.mjs'
+```
+
+规则：
+
+- 比较语义只对**数字字段**生效；字段是字符串时比较**永不匹配**（不会把字符串转数字强比）。
+- 字符串语法以 `>`/`>=`/`<`/`<=`/`=` 开头且后跟数字才算比较（如 `'>10000'`）；其余字符串仍是普通正则。
+- 字段缺失照旧视为不匹配。空对象 `{}` 恒真（无任何条件）。
+
+### 执行选项：enabled / cwd / maxConcurrent / debounceMs
+
+每个 hook 都可以独立微调执行方式：
+
+- **`enabled: false`**：停用该 hook 但保留配置。跳过是静默的——不记执行历史、不计入失败链（`hook/failed` 不会因停用的 hook 触发）。dry-run 会标出 `enabled: false（已停用）`。
+- **`cwd: 'session'`**：在会话工作目录（agent 正在工作的项目目录）执行 `run`，方便 hook 脚本直接读写当前项目文件；`cwd` 也接受绝对路径。缺省在插件进程目录执行。
+- **`maxConcurrent`**：并发进程上限。超过上限的触发被丢弃并记入执行历史（`skipped`，不触发失败告警）；一次逻辑执行（含其内部重试）始终占用一个名额。
+- **`debounceMs`**：去抖窗口。高频事件（`step/end`、`tool/*`…）窗口内的多次触发合并为一次 **trailing** 执行，携带最新一次的上下文；被合并掉的触发完全静默，不会刷日志/历史。窗口结束后的新触发正常执行。
+
+防 `step/end`/`tool/*` spawn 风暴的推荐组合：
+
+```yaml
+- on: 'step/end'
+  run: 'node examples/log-step.mjs'
+  debounceMs: 500       # 半秒内的连续步结束只跑一次
+  maxConcurrent: 2      # 兜底：命令变慢时并发不超过 2
+```
+
+### turn/start 的触发内容
+
+会话日志先记录 `turn/start`、后记录该回合的 `user/message`，所以回合开始那一刻还读不到触发文本。插件因此把 `turn/start` 的派发**延迟到本回合首条直接用户消息分类后**，把消息文本注入 `DSH_HOOK_CONTENT`（截断 2000 字符）：
+
+```yaml
+- on: 'turn/start'
+  match: { content: '部署|发版' }   # 只关心包含关键词的回合
+  notify: { channel: 'desktop' }
+```
+
+时序说明：
+
+- 有 `turn/start` hook 时才启用延迟；没有的话派发保持原样（立即执行，无内容）。
+- 注入文本只认 `source.kind === 'user'` 的直接用户消息；系统注入（agent/plugin 来源）不会完成派发。
+- 回合内没有直接用户消息（如目标续跑回合）时，`turn/start` 在 `turn/end` 时**不带内容**派发；新回合开始会先冲掉上一个未认领的 `turn/start`。
+- 直接用户回合中，延迟通常只有几毫秒（`user/message` 紧随 `turn/start`），先于任何步骤/工具事件。
+
 ## 执行历史
 
 每次 hook 触发都会记入内存环形缓冲（默认 500 条），并 best-effort 追加到 `~/.dsh/dsh-hooks/history.jsonl`（权限 0600）——供未来 UI 与调试使用。环形缓冲在启动时从 JSONL 回填，且 Web 面板每次读取时增量同步磁盘上新增的记录（包括其他 dsh 进程的追加，如任务看板 Host），因此重启后历史不会消失。记录不含 secret（环境变量从不入记录）：
@@ -183,7 +256,7 @@ config:
     hooks: […]
 ```
 
-每条记录：时间戳、kind（run/notify）、事件、命令、会话、结果（spawned / exit-0 / exit-nonzero / timeout / sent / send-failed…）、退出码、耗时、stderr 尾部。写盘失败静默吞掉，绝不阻塞 hook。
+每条记录：时间戳、kind（run/notify）、事件、命令、会话、结果（spawned / exit-0 / exit-nonzero / timeout / skipped / sent / send-failed…）、退出码、耗时、stderr 尾部。写盘失败静默吞掉，绝不阻塞 hook。
 
 ## dry-run：验证配置
 

@@ -1,6 +1,6 @@
 import type { Session, SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session';
 import type { HookContext } from './context.js';
-import type { HookSpec, TurnEndReasonKind } from './config.js';
+import type { HookSpec, NumericMatch, TurnEndReasonKind } from './config.js';
 import type { AgentLike } from './types.js';
 /** `approval/asked` payload (merge-extensible, declared by dsh-user-approval). */
 export interface ApprovalAskedData {
@@ -84,13 +84,15 @@ export declare function clearTurnTracking(session: Session): void;
 /** Does a declared hook match this event (type + optional `when` filter)? */
 export declare function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndReasonKind): boolean;
 /**
- * Apply the optional `match` field → regex filters. Every declared regex
- * must match its context field (String-coerced); a field the context does
- * not carry never matches. An empty/absent `match` passes everything.
- * RegExps come pre-compiled from the config schema; non-RegExp entries are
- * rejected defensively (never match).
+ * Apply the optional `match` field → filter map. Each value is either a
+ * regex (compiled by the config schema; tested against the String-coerced
+ * field) or a numeric comparison — declared as an object (`{ gt: 10000 }`)
+ * or as a string that parses as one (`'>10000'`). Comparison semantics
+ * apply only when the context field is a number; on a non-numeric field a
+ * comparison never matches. Every declared filter must pass. An empty or
+ * absent `match` passes everything; unsupported shapes never match.
  */
-export declare function matchFilters(match: Record<string, RegExp> | undefined, ctx: HookContext): boolean;
+export declare function matchFilters(match: Record<string, RegExp | NumericMatch> | undefined, ctx: HookContext): boolean;
 export declare function turnEndContext(session: Session, turn: number, reason: TurnEndReason | string): HookContext;
 export declare function turnStartContext(session: Session, turn: number): HookContext;
 export declare function stepEndContext(session: Session, turn: number, step: number): HookContext;

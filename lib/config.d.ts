@@ -17,7 +17,20 @@ export interface NotifySpec {
     /** webhook: post a Slack-style `{ text }` one-line summary instead of the full context document. */
     slack?: boolean;
 }
-/** One declared hook: a matching event runs `run` (or sends `notify`). */
+/**
+ * Numeric comparison filter for `match`: every declared op must hold for
+ * the (numeric) context field. Declared in YAML as an object (`{ gt: 10000 }`)
+ * or as an equivalent string (`'>10000'`); both compare against the field's
+ * number value, never its string form.
+ */
+export interface NumericMatch {
+    gt?: number;
+    gte?: number;
+    lt?: number;
+    lte?: number;
+    eq?: number;
+}
+/** One hook: a matching event runs `run` (or sends `notify`). */
 export interface HookSpec {
     /** Event that triggers the hook. */
     on: HookEvent;
@@ -27,12 +40,15 @@ export interface HookSpec {
      */
     when?: TurnEndReasonKind;
     /**
-     * Optional field → regex filters: every declared regex must match the
-     * context's field value for the hook to run. Fields are `HookContext`
-     * keys (`tool`, `sessionName`, `sessionId`, `error`, `source`, `cwd`,
-     * `content`, …); a field absent from the context never matches.
+     * Optional field → filter map: every declared filter must match the
+     * context's field value for the hook to run. Values are regexes (tested
+     * against the String-coerced field) or numeric comparisons (`{ gt: 10000 }`
+     * / `'>10000'`, numbers only). Fields are `HookContext` keys (`tool`,
+     * `sessionName`, `sessionId`, `error`, `source`, `cwd`, `content`, `turn`,
+     * `durationMs`, `runningSubagents`, …); a field absent from the context
+     * never matches.
      */
-    match?: Record<string, RegExp>;
+    match?: Record<string, RegExp | NumericMatch>;
     /**
      * Command to spawn through the platform shell. Exactly one of `run` and
      * `notify` must be declared.
@@ -55,6 +71,29 @@ export interface HookSpec {
     retries?: number;
     /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
     retryDelayMs?: number;
+    /**
+     * Disable this hook without deleting it: the declaration stays in config,
+     * dispatch skips it silently (never counted as a failure). Defaults to true.
+     */
+    enabled?: boolean;
+    /**
+     * Working directory for the spawned command. `'session'` runs in the
+     * session's cwd (the project the agent works on); any other value must be
+     * an absolute path. Defaults to the plugin process directory.
+     */
+    cwd?: 'session' | string;
+    /**
+     * Maximum number of concurrently running processes for this hook.
+     * Triggers beyond the limit are dropped (recorded as `skipped`). Defaults
+     * to unlimited; `0` also means unlimited.
+     */
+    maxConcurrent?: number;
+    /**
+     * Debounce window in milliseconds for high-frequency events (step/end,
+     * tool/*, …): triggers inside the window collapse into one trailing
+     * execution carrying the latest context. Defaults to 0 (disabled).
+     */
+    debounceMs?: number;
 }
 /** Execution-history settings: in-memory ring buffer + optional JSONL log. */
 export interface HistoryConfig {
