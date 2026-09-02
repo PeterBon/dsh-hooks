@@ -107,6 +107,32 @@ describe('createHookHandler', () => {
     })
   })
 
+  it('describes execution options and numeric match values for the panel', async () => {
+    const withOptions = [
+      {
+        on: 'tool/result',
+        match: { toolDurationMs: { gt: 10000 } },
+        run: 'x',
+        enabled: false,
+        cwd: 'session',
+        maxConcurrent: 2,
+        debounceMs: 250,
+      },
+    ] as HookSpec[]
+    const handler = createHookHandler({ hooks: withOptions, history: createHistorySink({ enabled: false }) })
+    const res = fakeRes()
+    await handler(fakeReq(), res)
+    const { body } = readJson(res)
+    const value = (body as { value: { hooks: Array<Record<string, unknown>> } }).value
+    expect(value.hooks[0]).toMatchObject({
+      enabled: false,
+      cwd: 'session',
+      maxConcurrent: 2,
+      debounceMs: 250,
+      match: { toolDurationMs: '>10000' }, // single-op object → equivalent string syntax
+    })
+  })
+
   it('serves the newest N history records', async () => {
     const history = createHistorySink({ enabled: false })
     for (let i = 0; i < 5; i++) {

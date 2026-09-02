@@ -13,6 +13,10 @@ export interface HookWireSpec {
     timeoutMs?: number;
     retries?: number;
     retryDelayMs?: number;
+    enabled?: boolean;
+    cwd?: 'session' | string;
+    maxConcurrent?: number;
+    debounceMs?: number;
 }
 /** Parse a patch list; throws a user-facing error on malformed YAML. */
 export declare function parsePatchText(text: string): unknown[];

@@ -49,7 +49,21 @@ export interface NotifySpec {
   slack?: boolean
 }
 
-/** One declared hook: a matching event runs `run` (or sends `notify`). */
+/**
+ * Numeric comparison filter for `match`: every declared op must hold for
+ * the (numeric) context field. Declared in YAML as an object (`{ gt: 10000 }`)
+ * or as an equivalent string (`'>10000'`); both compare against the field's
+ * number value, never its string form.
+ */
+export interface NumericMatch {
+  gt?: number
+  gte?: number
+  lt?: number
+  lte?: number
+  eq?: number
+}
+
+/** One hook: a matching event runs `run` (or sends `notify`). */
 export interface HookSpec {
   /** Event that triggers the hook. */
   on: HookEvent
@@ -59,12 +73,15 @@ export interface HookSpec {
    */
   when?: TurnEndReasonKind
   /**
-   * Optional field → regex filters: every declared regex must match the
-   * context's field value for the hook to run. Fields are `HookContext`
-   * keys (`tool`, `sessionName`, `sessionId`, `error`, `source`, `cwd`,
-   * `content`, …); a field absent from the context never matches.
+   * Optional field → filter map: every declared filter must match the
+   * context's field value for the hook to run. Values are regexes (tested
+   * against the String-coerced field) or numeric comparisons (`{ gt: 10000 }`
+   * / `'>10000'`, numbers only). Fields are `HookContext` keys (`tool`,
+   * `sessionName`, `sessionId`, `error`, `source`, `cwd`, `content`, `turn`,
+   * `durationMs`, `runningSubagents`, …); a field absent from the context
+   * never matches.
    */
-  match?: Record<string, RegExp>
+  match?: Record<string, RegExp | NumericMatch>
   /**
    * Command to spawn through the platform shell. Exactly one of `run` and
    * `notify` must be declared.
@@ -87,6 +104,29 @@ export interface HookSpec {
   retries?: number
   /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
   retryDelayMs?: number
+  /**
+   * Disable this hook without deleting it: the declaration stays in config,
+   * dispatch skips it silently (never counted as a failure). Defaults to true.
+   */
+  enabled?: boolean
+  /**
+   * Working directory for the spawned command. `'session'` runs in the
+   * session's cwd (the project the agent works on); any other value must be
+   * an absolute path. Defaults to the plugin process directory.
+   */
+  cwd?: 'session' | string
+  /**
+   * Maximum number of concurrently running processes for this hook.
+   * Triggers beyond the limit are dropped (recorded as `skipped`). Defaults
+   * to unlimited; `0` also means unlimited.
+   */
+  maxConcurrent?: number
+  /**
+   * Debounce window in milliseconds for high-frequency events (step/end,
+   * tool/*, …): triggers inside the window collapse into one trailing
+   * execution carrying the latest context. Defaults to 0 (disabled).
+   */
+  debounceMs?: number
 }
 
 /** Execution-history settings: in-memory ring buffer + optional JSONL log. */
@@ -127,8 +167,19 @@ export const Config: {
       when: Schema.union([...TURN_END_REASONS]).description(
         '可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted）；其他事件忽略该字段',
       ),
-      match: Schema.dict(Schema.regExp()).description(
-        '可选通用过滤：字段 → 正则，全部匹配才触发。字段为上下文键（tool/sessionName/sessionId/error/source/cwd/content/reason/…），上下文中不存在的字段视为不匹配',
+      match: Schema.dict(
+        Schema.union([
+          Schema.regExp(),
+          Schema.object({
+            gt: Schema.number(),
+            gte: Schema.number(),
+            lt: Schema.number(),
+            lte: Schema.number(),
+            eq: Schema.number(),
+          }).description('数值比较（可组合，全部满足才匹配；要求上下文字段为数字）'),
+        ]),
+      ).description(
+        '可选通用过滤：字段 → 正则或数值比较，全部匹配才触发。正则匹配字段的字符串表示；数值比较支持对象语法 { gt: 10000 } 或字符串语法 \'>10000\'（gt/gte/lt/lte/eq），只对数字字段生效，非数字字段永不匹配。字段为上下文键（tool/sessionName/sessionId/error/source/cwd/content/reason/turn/durationMs/runningSubagents/…），上下文中不存在的字段视为不匹配',
       ),
       run: Schema.string().description('触发时通过系统 shell 执行的命令（与 notify 二选一）'),
       notify: Schema.union([
@@ -149,6 +200,18 @@ export const Config: {
       timeoutMs: Schema.number().default(10000).description('单次执行超时（毫秒）'),
       retries: Schema.natural().default(0).description('非零退出码的重试次数（默认 0 不重试；spawn 失败与超时不重试）'),
       retryDelayMs: Schema.natural().default(500).description('重试基础间隔（毫秒），每次翻倍'),
+      enabled: Schema.boolean()
+        .default(true)
+        .description('停用开关：false 保留配置但跳过派发（静默跳过，不计失败；默认 true）'),
+      cwd: Schema.union([Schema.const('session'), Schema.string()]).description(
+        '执行工作目录：session 在会话工作目录执行；绝对路径在指定目录执行；缺省用插件进程目录（只作用于 run）',
+      ),
+      maxConcurrent: Schema.natural().description(
+        '该 hook 允许的最大并发进程数；超过上限的触发被丢弃（历史记 skipped）。缺省不限（0 同样视为不限）',
+      ),
+      debounceMs: Schema.natural().description(
+        '去抖窗口（毫秒）：高频事件（step/end、tool/* 等）窗口内的多次触发合并为一次 trailing 执行，携带最新上下文。缺省 0 = 不去抖',
+      ),
     }).description('一个事件 → 命令/通知的 hook 声明'),
   )
     .default([])

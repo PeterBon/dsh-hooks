@@ -472,6 +472,22 @@ describe('new firehose events', () => {
       }),
     )
     expect(ctx).toMatchObject({ event: 'tool/result', tool: 'read', callId: 'call-9', content: '文件内容', toolError: undefined })
+    // Paired tool/call → wall-clock duration reported.
+    expect(ctx?.toolDurationMs).toBeTypeOf('number')
+    expect(ctx?.toolDurationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('leaves toolDurationMs undefined when the pairing call was never seen', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        callId: 'call-10',
+        message: { id: 'm2', role: 'user', content: [{ type: 'tool-result', toolCallId: 'call-10', content: [] }], source: { kind: 'tool', callId: 'call-10' } },
+      }),
+    )
+    expect(ctx).toMatchObject({ event: 'tool/result', tool: undefined, toolDurationMs: undefined })
   })
 
   it('classifies tool/result with a failure identity', () => {
@@ -575,5 +591,43 @@ describe('matchFilters', () => {
 
   it('rejects non-RegExp patterns defensively', () => {
     expect(matchFilters({ tool: '^pw' as unknown as RegExp }, ctx)).toBe(false)
+  })
+
+  it('supports numeric comparison objects on numeric fields', () => {
+    const numbered = { event: 'turn/end', turn: 7, durationMs: 15000, timestamp: 'T' }
+    expect(matchFilters({ durationMs: { gt: 10000 } }, numbered)).toBe(true)
+    expect(matchFilters({ durationMs: { gte: 15000 } }, numbered)).toBe(true)
+    expect(matchFilters({ durationMs: { lt: 20000 } }, numbered)).toBe(true)
+    expect(matchFilters({ durationMs: { lte: 15000 } }, numbered)).toBe(true)
+    expect(matchFilters({ durationMs: { eq: 15000 } }, numbered)).toBe(true)
+    expect(matchFilters({ durationMs: { gt: 20000 } }, numbered)).toBe(false)
+    expect(matchFilters({ durationMs: { gt: 10000, lt: 20000 } }, numbered)).toBe(true)
+    expect(matchFilters({ durationMs: { gt: 10000, lt: 12000 } }, numbered)).toBe(false)
+  })
+
+  it('supports comparison string syntax on numeric fields', () => {
+    const numbered = { event: 'tool/result', toolDurationMs: 3500, timestamp: 'T' }
+    expect(matchFilters({ toolDurationMs: />3000/ }, numbered)).toBe(true)
+    expect(matchFilters({ toolDurationMs: /<=3500/ }, numbered)).toBe(true)
+    expect(matchFilters({ toolDurationMs: /=3500/ }, numbered)).toBe(true)
+    expect(matchFilters({ toolDurationMs: />4000/ }, numbered)).toBe(false)
+    expect(matchFilters({ toolDurationMs: /<1000/ }, numbered)).toBe(false)
+  })
+
+  it('never matches comparisons against non-numeric fields', () => {
+    const str = { event: 'tool/call', tool: 'pwsh', timestamp: 'T' }
+    expect(matchFilters({ tool: />5/ }, str)).toBe(false)
+    expect(matchFilters({ tool: { gt: 1 } }, str)).toBe(false)
+  })
+
+  it('keeps plain regex semantics for sources without a full comparison shape', () => {
+    const str = { event: 'tool/call', tool: 'a>psb', timestamp: 'T' }
+    expect(matchFilters({ tool: />ps/ }, str)).toBe(true)
+  })
+
+  it('treats an empty comparison object as never matching', () => {
+    const numbered = { event: 'turn/end', turn: 7, timestamp: 'T' }
+    expect(matchFilters({ turn: {} }, numbered)).toBe(true)
+    expect(matchFilters({ turn: {} }, { event: 'turn/end', timestamp: 'T' })).toBe(false)
   })
 })

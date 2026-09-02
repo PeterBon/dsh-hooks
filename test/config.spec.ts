@@ -126,4 +126,42 @@ describe('Config schema', () => {
     expect(Config({}).history).toBeUndefined()
     expect(Config({ history: {} }).history).toMatchObject({ enabled: true, max: 500 })
   })
+
+  it('accepts per-hook execution options with defaults', () => {
+    const result = Config({
+      hooks: [{ on: 'turn/end', run: 'x', enabled: false, cwd: 'session', maxConcurrent: 2, debounceMs: 250 }],
+    })
+    expect(result.hooks?.[0]).toMatchObject({
+      enabled: false,
+      cwd: 'session',
+      maxConcurrent: 2,
+      debounceMs: 250,
+    })
+    const defaults = Config({ hooks: [{ on: 'turn/end', run: 'x' }] })
+    expect(defaults.hooks?.[0]?.enabled).toBe(true)
+    expect(defaults.hooks?.[0]?.cwd).toBeUndefined()
+    expect(defaults.hooks?.[0]?.maxConcurrent).toBeUndefined()
+    expect(defaults.hooks?.[0]?.debounceMs).toBeUndefined()
+  })
+
+  it('accepts cwd as an absolute path string', () => {
+    const result = Config({ hooks: [{ on: 'turn/end', run: 'x', cwd: 'D:\\work\\demo' }] })
+    expect(result.hooks?.[0]?.cwd).toBe('D:\\work\\demo')
+  })
+
+  it('compiles numeric comparison match objects and string syntax', () => {
+    const result = Config({
+      hooks: [{ on: 'tool/result', match: { toolDurationMs: { gt: 10000 } }, run: 'x' }],
+    })
+    expect(result.hooks?.[0]?.match?.toolDurationMs).toEqual({ gt: 10000 })
+    const stringy = Config({ hooks: [{ on: 'tool/result', match: { toolDurationMs: '>10000' }, run: 'x' }] })
+    expect(stringy.hooks?.[0]?.match?.toolDurationMs).toBeInstanceOf(RegExp)
+    expect((stringy.hooks?.[0]?.match?.toolDurationMs as RegExp).source).toBe('>10000')
+  })
+
+  it('rejects a numeric match object with a non-number operand', () => {
+    expect(() =>
+      Config({ hooks: [{ on: 'tool/result', match: { toolDurationMs: { gt: 'many' } }, run: 'x' }] }),
+    ).toThrow()
+  })
 })

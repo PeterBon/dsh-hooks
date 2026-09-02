@@ -1,6 +1,6 @@
 import type { Session, SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session'
 import type { HookContext } from './context.js'
-import type { HookSpec, TurnEndReasonKind } from './config.js'
+import type { HookSpec, NumericMatch, TurnEndReasonKind } from './config.js'
 import type { AgentLike } from './types.js'
 
 /** `approval/asked` payload (merge-extensible, declared by dsh-user-approval). */
@@ -56,8 +56,11 @@ export interface AgentStatusPayload {
 /** Per-session turn start timestamps for duration reporting. */
 const turnStarts = new Map<string, number>()
 
-/** Tool name for an in-flight call, remembered at `tool/call` and consumed at `tool/result`. */
-const callTools = new Map<string, string>()
+/**
+ * Tool name + start timestamp for an in-flight call, remembered at
+ * `tool/call` and consumed at `tool/result` (name back-fill + duration).
+ */
+const callTools = new Map<string, { tool: string; startedAt: number }>()
 
 /** Approval identity remembered at `approval/asked` and consumed at `approval/decided`. */
 const approvalTools = new Map<string, { toolName: string; callId?: string }>()
@@ -211,20 +214,70 @@ export function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndR
   return spec.when === reasonKind
 }
 
+/** Comparison-prefixed string syntax: `'>10000'`, `'>=5'`, `'<2'`, `'<=9'`, `'=42'`. */
+const COMPARE_STRING = /^([<>]=?|=)\s*(-?\d+(?:\.\d+)?)$/
+
+const OPERATOR_SYMBOLS: Record<string, keyof NumericMatch> = {
+  '>': 'gt',
+  '>=': 'gte',
+  '<': 'lt',
+  '<=': 'lte',
+  '=': 'eq',
+}
+
+/** Symbol/field form of a comparison matcher: `{ gt: 10000 }`, `' > 10000'`, … */
+function numericOps(value: RegExp | NumericMatch): NumericMatch | undefined {
+  if (!(value instanceof RegExp)) return value
+  const parsed = COMPARE_STRING.exec(value.source)
+  if (parsed === null) return undefined
+  const op = OPERATOR_SYMBOLS[parsed[1]]
+  if (op === undefined) return undefined
+  return { [op]: Number(parsed[2]) }
+}
+
+/** Does a numeric context field satisfy every declared comparison op? */
+function compareNumber(n: number, ops: NumericMatch): boolean {
+  if (ops.gt !== undefined && !(n > ops.gt)) return false
+  if (ops.gte !== undefined && !(n >= ops.gte)) return false
+  if (ops.lt !== undefined && !(n < ops.lt)) return false
+  if (ops.lte !== undefined && !(n <= ops.lte)) return false
+  if (ops.eq !== undefined && !(n === ops.eq)) return false
+  return true
+}
+
 /**
- * Apply the optional `match` field → regex filters. Every declared regex
- * must match its context field (String-coerced); a field the context does
- * not carry never matches. An empty/absent `match` passes everything.
- * RegExps come pre-compiled from the config schema; non-RegExp entries are
- * rejected defensively (never match).
+ * Apply the optional `match` field → filter map. Each value is either a
+ * regex (compiled by the config schema; tested against the String-coerced
+ * field) or a numeric comparison — declared as an object (`{ gt: 10000 }`)
+ * or as a string that parses as one (`'>10000'`). Comparison semantics
+ * apply only when the context field is a number; on a non-numeric field a
+ * comparison never matches. Every declared filter must pass. An empty or
+ * absent `match` passes everything; unsupported shapes never match.
  */
-export function matchFilters(match: Record<string, RegExp> | undefined, ctx: HookContext): boolean {
+export function matchFilters(
+  match: Record<string, RegExp | NumericMatch> | undefined,
+  ctx: HookContext,
+): boolean {
   if (match === undefined) return true
   for (const [field, pattern] of Object.entries(match)) {
-    if (!(pattern instanceof RegExp)) return false
     const value = (ctx as unknown as Record<string, unknown>)[field]
     if (value === undefined) return false
-    if (!pattern.test(String(value))) return false
+    if (pattern instanceof RegExp) {
+      const ops = numericOps(pattern)
+      if (ops !== undefined) {
+        // Comparison syntax: numbers only, never coerced strings.
+        if (typeof value !== 'number' || !compareNumber(value, ops)) return false
+        continue
+      }
+      if (!pattern.test(String(value))) return false
+      continue
+    }
+    // Object form `{ gt: … }` comes pre-typed from the schema.
+    if (typeof pattern === 'object' && pattern !== null) {
+      if (typeof value !== 'number' || !compareNumber(value, pattern)) return false
+      continue
+    }
+    return false
   }
   return true
 }
@@ -301,12 +354,13 @@ export function toolCallContext(
   args: unknown,
 ): HookContext {
   const key = callKey(session, callId)
-  callTools.set(key, typeof name === 'string' ? name : String(name))
+  const tool = typeof name === 'string' ? name : String(name)
+  callTools.set(key, { tool, startedAt: Date.now() })
   return {
     ...baseContext(session, 'tool/call'),
     turn,
     step,
-    tool: typeof name === 'string' ? name : String(name),
+    tool,
     callId: String(callId),
     toolArgs: typeof args === 'string' ? args.slice(0, 4000) : undefined,
   }
@@ -321,8 +375,8 @@ export function toolResultContext(
   error: { name?: unknown; code?: unknown } | undefined,
 ): HookContext {
   const key = callKey(session, callId)
-  const tool = callTools.get(key)
-  if (tool !== undefined) callTools.delete(key)
+  const paired = callTools.get(key)
+  if (paired !== undefined) callTools.delete(key)
   let toolError: string | undefined
   if (error !== undefined) {
     const name = typeof error.name === 'string' ? error.name : undefined
@@ -334,8 +388,9 @@ export function toolResultContext(
     ...baseContext(session, 'tool/result'),
     turn,
     step,
-    tool,
+    tool: paired?.tool,
     callId: String(callId),
+    toolDurationMs: paired === undefined ? undefined : Date.now() - paired.startedAt,
     toolError,
     content: content === undefined ? undefined : content.slice(0, 4000),
   }

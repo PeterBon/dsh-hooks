@@ -52,6 +52,12 @@ describe('toEnv', () => {
     expect(env.DSH_HOOK_SOURCE).toBe('user')
   })
 
+  it('carries tool duration on tool/result', () => {
+    const env = toEnv({ event: 'tool/result', toolDurationMs: 1234, timestamp: 'T' })
+    expect(env.DSH_HOOK_TOOL_DURATION_MS).toBe('1234')
+    expect(toEnv({ event: 'tool/result', timestamp: 'T' }).DSH_HOOK_TOOL_DURATION_MS).toBeUndefined()
+  })
+
   it('omits the tool/source fields when absent', () => {
     const env = toEnv({ event: 'step/end', timestamp: 'T' })
     expect('DSH_HOOK_STEP' in env).toBe(false)

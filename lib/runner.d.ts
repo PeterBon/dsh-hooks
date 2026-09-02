@@ -9,7 +9,7 @@ export interface RunOutcome {
 }
 /** Track in-flight hook runs so a missing parent never outlives teardown. */
 export interface HookRunner {
-    run(spec: HookSpec, ctx: HookContext, recordOverride?: RunRecord): RunOutcome;
+    run(spec: HookSpec, ctx: HookContext, recordOverride?: RunRecord, limiter?: RunLimiter): RunOutcome;
     /** Live counters for the web-panel diagnostics. */
     stats(): HookRunnerStats;
     dispose(): void;
@@ -21,6 +21,15 @@ export interface HookRunnerStats {
     pendingRetries: number;
 }
 export type RunRecord = (record: Omit<HookRunRecord, 'ts'>) => void;
+/**
+ * Per-hook concurrency gate: runs carrying the same `id` share one cap.
+ * Accepted runs occupy a slot until the logical run reaches a terminal
+ * outcome (retries keep the slot), so a retrying hook still counts.
+ */
+export interface RunLimiter {
+    id: string;
+    max: number;
+}
 export declare const DEFAULT_TIMEOUT_MS = 10000;
 export declare const DEFAULT_RETRY_DELAY_MS = 500;
 /**
@@ -38,5 +47,7 @@ export declare function terminate(child: ChildProcess): void;
  * templating by the user. `input: 'stdin'` additionally writes the full
  * context as one JSON document to stdin, and `retries` re-spawns commands
  * whose exit code is non-zero (with exponential backoff, in the background).
+ * `cwd` moves the spawn into the session/project directory, and an optional
+ * `limiter` caps concurrent runs per identity.
  */
 export declare function createHookRunner(log?: (line: string) => void, record?: RunRecord): HookRunner;

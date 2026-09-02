@@ -63,6 +63,10 @@ export declare function describeHooks(hooks: readonly HookSpec[]): {
     timeoutMs: number | undefined;
     retries: number | undefined;
     retryDelayMs: number | undefined;
+    enabled: boolean | undefined;
+    cwd: string | undefined;
+    maxConcurrent: number | undefined;
+    debounceMs: number | undefined;
 }[];
 /** Create the /dsh-hooks route handler (exported for tests). */
 export declare function createHookHandler(options: HookRoutesOptions): (req: IncomingMessage, res: ServerResponse) => Promise<void>;

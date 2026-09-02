@@ -54,6 +54,18 @@ Add a config block to your profile's `cordis.patch.yml`:
           channel: 'webhook'         # POST JSON to any HTTP endpoint
           url: 'https://hooks.slack.com/services/…'
           slack: true                # optional: { text } one-line summary (Slack style)
+      - on: 'step/end'
+        run: 'node examples/log-step.mjs'
+        debounceMs: 500              # optional: debounce high-frequency events
+        maxConcurrent: 2             # optional: cap concurrent processes
+      - on: 'tool/result'
+        match:
+          toolDurationMs: '>10000'   # numeric comparison ({ gt: 10000 } object form too)
+        run: 'node examples/notify-slow-tool.mjs'
+      - on: 'turn/end'
+        enabled: false               # optional: disable without deleting
+        cwd: 'session'               # optional: run in the session working directory
+        run: 'node examples/log-turn.mjs'
 ```
 
 Every hook field:
@@ -62,24 +74,28 @@ Every hook field:
 | --- | --- | --- |
 | `on` | triggering event (see the event table) | required |
 | `when` | filter `turn/end` by end reason | all reasons |
-| `match` | field → regex, all must match; fields are context keys (`tool` / `sessionName` / `sessionId` / `error` / `source` / `cwd` / `content` / `reason`, …), a field absent from the context never matches | no filter |
+| `match` | field → regex or numeric comparison, all must match; fields are context keys (`tool` / `sessionName` / `sessionId` / `error` / `source` / `cwd` / `content` / `reason` / `turn` / `durationMs` / `toolDurationMs`, …), a field absent from the context never matches. Regexes test the string form; comparisons (`{ gt: 10000 }` or `'>10000'`, ops `gt` / `gte` / `lt` / `lte` / `eq`, combinable) apply only to numeric fields and never match non-numeric ones | no filter |
 | `run` | command spawned through the platform shell (exactly one of `run` / `notify`) | one of the two required |
 | `notify` | built-in notification (exactly one of `run` / `notify`): `channel: webhook` (HTTP JSON; omit `url` to use `DSH_HOOKS_WEBHOOK_URL`, `slack: true` for a one-line summary) or `channel: desktop` (platform balloon/toast) | one of the two required |
 | `input` | `env` passes only the `DSH_HOOK_*` variables; `stdin` additionally writes the full context JSON to the command's stdin | `env` |
 | `timeoutMs` | per-run timeout (ms); the process tree is terminated on expiry | 10000 |
 | `retries` | retry count for non-zero exit codes (spawn failures and timeouts never retry) | 0 |
 | `retryDelayMs` | base delay between retries (ms), doubles per attempt | 500 |
+| `enabled` | `false` disables the hook without deleting it: the declaration stays, dispatch skips it silently (never counts as a failure) | `true` |
+| `cwd` | working directory for the spawned command: `session` runs in the session's cwd, an absolute path runs there (`run` only) | plugin process directory |
+| `maxConcurrent` | max concurrently running processes for this hook; triggers beyond the cap are dropped (recorded as `skipped`) | unlimited |
+| `debounceMs` | debounce window (ms): triggers of high-frequency events (`step/end`, `tool/*`, …) inside the window collapse into one trailing execution carrying the latest context | 0 (off) |
 
 ## Events (v1)
 
 | Event | When it fires | Useful context |
 | --- | --- | --- |
-| `turn/start` | A turn begins | session id, turn |
+| `turn/start` | A turn begins (with `turn/start` hooks, dispatch waits for the turn's first direct user message and attaches its text as `DSH_HOOK_CONTENT`; turns without one dispatch content-less at `turn/end`, see below) | session id, turn, initiating message text |
 | `turn/end` | A turn ends (`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`) | reason, turn, duration, content, turn token usage, running subagents |
 | `tree/settled` | A watched session's whole subagent tree settles (no live child still running) after a turn ended with work handed off | total subagents, handoff→settle duration |
 | `step/end` | One step of a turn ends (one model call plus its tool executions) | turn, step |
 | `tool/call` | The model requests one tool invocation | tool name, call id, raw arguments JSON |
-| `tool/result` | A tool call completes | tool name (resolved), result text, failure identity |
+| `tool/result` | A tool call completes | tool name (resolved), result text, failure identity, wall-clock duration (absent when the pairing call was never seen) |
 | `user/message` | A user-role message appears on the surface | source kind (`user` / `plugin` / …), message text |
 | `approval/asked` | A tool call requests user approval | tool name, call id, approval id, reason |
 | `approval/decided` | A pending approval gets its outcome (paired with `approval/asked` by id) | outcome, tool name (resolved), call id, approval id |
@@ -112,11 +128,12 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_CALL_ID` | tool call id (approval / tool events) |
 | `DSH_HOOK_TOOL_ARGS` | raw tool arguments JSON (tool/call) |
 | `DSH_HOOK_TOOL_ERROR` | tool failure identity `name: code` (tool/result errors) |
+| `DSH_HOOK_TOOL_DURATION_MS` | wall-clock tool execution ms (tool/result; absent when the pairing tool/call was never seen) |
 | `DSH_HOOK_SOURCE` | message / title source kind (`user`, `plugin`, `fallback`, `provider`, …) |
 | `DSH_HOOK_DURATION_MS` | turn duration ms (turn/end) |
 | `DSH_HOOK_STATUS` | agent status (`agent/status`) |
 | `DSH_HOOK_ERROR` | error text (`agent/error`, and the failure message on `turn/end` error) |
-| `DSH_HOOK_CONTENT` | event content snapshot: turn assistant text, tool result text, user message text |
+| `DSH_HOOK_CONTENT` | event content snapshot: turn assistant text, tool result text, user message text, turn-initiating message text (turn/start) |
 | `DSH_HOOK_USAGE_INPUT_TOKENS` | aggregated input tokens of the turn (turn/end, summed across steps) |
 | `DSH_HOOK_USAGE_OUTPUT_TOKENS` | aggregated output tokens of the turn |
 | `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | aggregated cache-read tokens, when reported |
@@ -167,6 +184,62 @@ For the simpler "notify only once the whole tree settles" pattern, the synthetic
 
 Settled-but-idle continuable children do not count as running, so they don't keep suppressing the notification. The settle watch is event-driven and best-effort: it survives until the plugin restarts, and a failed re-check drops the watch silently (no late notification).
 
+### Numeric match comparisons
+
+Numeric context fields (`turn`, `step`, `durationMs`, `toolDurationMs`, `usage*`, `runningSubagents`, …) support real comparisons instead of regex hacks:
+
+```yaml
+- on: 'tool/result'
+  match: { toolDurationMs: '>10000' }   # string syntax: > >= < <= =
+  run: 'node examples/notify-slow-tool.mjs'
+
+- on: 'tool/result'
+  match:
+    toolDurationMs: { gt: 10000, lt: 60000 }   # object syntax: gt/gte/lt/lte/eq, combinable
+  run: 'node examples/notify-slow-tool.mjs'
+```
+
+Rules:
+
+- Comparison semantics apply only to **numeric** fields; on a string field a comparison **never matches** (no string coercion).
+- A string value counts as a comparison only when it starts with `>` / `>=` / `<` / `<=` / `=` followed by a number (e.g. `'>10000'`); anything else stays a plain regex.
+- A missing field still never matches. An empty object `{}` matches vacuously.
+
+### Execution options: enabled / cwd / maxConcurrent / debounceMs
+
+Every hook can tune its execution independently:
+
+- **`enabled: false`** disables the hook but keeps the declaration. Skipping is silent — no history record, never part of a failure streak (`hook/failed` never fires for a disabled hook). dry-run marks it `enabled: false（已停用）`.
+- **`cwd: 'session'`** spawns `run` in the session's working directory (the project the agent works on), so hook scripts can read/write project files directly; an absolute path works too. Defaults to the plugin process directory.
+- **`maxConcurrent`** caps concurrent processes for the hook. Triggers beyond the cap are dropped and recorded as `skipped` (no failure alert); one logical run (its internal retries included) always occupies one slot.
+- **`debounceMs`** debounces high-frequency events (`step/end`, `tool/*`, …): triggers inside the window collapse into one **trailing** execution carrying the latest context. Collapsed triggers are fully silent — they never flood the log or history. New triggers after the window run normally.
+
+The recommended combination against `step/end` / `tool/*` spawn storms:
+
+```yaml
+- on: 'step/end'
+  run: 'node examples/log-step.mjs'
+  debounceMs: 500       # consecutive step ends within half a second run once
+  maxConcurrent: 2      # safety net: at most 2 processes even when slow
+```
+
+### turn/start carries the initiating message
+
+The session log records `turn/start` *before* the turn's `user/message`, so the prompt text is not readable at turn-start time. When `turn/start` hooks exist, the plugin defers their dispatch until the turn's first direct user message is classified, attaching its text as `DSH_HOOK_CONTENT` (capped at 2000 chars):
+
+```yaml
+- on: 'turn/start'
+  match: { content: 'deploy|release' }   # only turns asking about deploys
+  notify: { channel: 'desktop' }
+```
+
+Timing notes:
+
+- The deferral only kicks in when `turn/start` hooks exist; otherwise dispatch stays as before (immediate, no content).
+- Only direct user messages (`source.kind === 'user'`) complete the dispatch; synthetic injections (agent/plugin sources) do not.
+- A turn without a direct user message (e.g. a goal continuation round) dispatches `turn/start` **without content** at `turn/end`; a new turn flushes an unclaimed previous `turn/start` first.
+- For direct-user turns the delay is typically milliseconds (`user/message` immediately follows `turn/start`), still ahead of any step/tool events.
+
 ## Generic webhook example
 
 Besides Feishu, `examples/notify-webhook.mjs` posts the full hook context as one JSON document to any HTTP endpoint — Slack incoming webhooks, Discord, Lark/DingTalk custom bots, ntfy, Bark, n8n:
@@ -200,7 +273,7 @@ Every hook trigger is recorded into an in-memory ring buffer (default 500 entrie
     hooks: […]
 ```
 
-Each record: timestamp, kind (run/notify), event, command, session, outcome (spawned / exit-0 / exit-nonzero / timeout / sent / send-failed, …), exit code, duration, stderr tail. Disk failures are swallowed silently — history never blocks a hook.
+Each record: timestamp, kind (run/notify), event, command, session, outcome (spawned / exit-0 / exit-nonzero / timeout / skipped / sent / send-failed, …), exit code, duration, stderr tail. Disk failures are swallowed silently — history never blocks a hook.
 
 ## dry-run: verify config
 

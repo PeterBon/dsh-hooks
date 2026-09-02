@@ -624,3 +624,176 @@ describe('hook/failed alerts', () => {
     expect(spawnEnv(1).DSH_HOOK_FAILURES).toBe('1')
   })
 })
+
+describe('per-hook execution options (#81)', () => {
+  const sessionObj = { id: 's1', header: { cwd: 'C:/tmp' }, events: [] }
+
+  function wire(config: Parameters<typeof apply>[1]) {
+    const { ctx, listeners } = fakeCtx()
+    apply(ctx, config)
+    const sessionEvent = listeners.get('session/event')
+    return { emit: (event: unknown) => sessionEvent?.[0]?.(sessionObj, event) }
+  }
+
+  it('silently skips hooks with enabled: false', () => {
+    const { emit } = wire({
+      hooks: [
+        { on: 'step/end', run: 'echo DISABLED', enabled: false },
+        { on: 'step/end', run: 'echo ENABLED' },
+      ],
+      history: { enabled: false },
+    })
+    emit({ type: 'step/end', data: { turn: 1, step: 1 } })
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(spawnMock.mock.calls[0]?.[0]).toBe('echo ENABLED')
+  })
+
+  it('debounces high-frequency triggers into one trailing execution', () => {
+    vi.useFakeTimers()
+    try {
+      const { emit } = wire({
+        hooks: [{ on: 'step/end', run: 'echo step', debounceMs: 100 }],
+        history: { enabled: false },
+      })
+      emit({ type: 'step/end', data: { turn: 1, step: 1 } })
+      emit({ type: 'step/end', data: { turn: 1, step: 2 } })
+      emit({ type: 'step/end', data: { turn: 1, step: 3 } })
+      expect(spawnMock).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(100)
+      expect(spawnMock).toHaveBeenCalledTimes(1)
+      const [, options] = spawnMock.mock.calls[0] as [string, { env: Record<string, string | undefined> }]
+      expect(options.env?.DSH_HOOK_STEP).toBe('3') // trailing context wins
+      // A new trigger after the window executes again.
+      emit({ type: 'step/end', data: { turn: 1, step: 4 } })
+      vi.advanceTimersByTime(100)
+      expect(spawnMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not debounce when debounceMs is absent', () => {
+    const { emit } = wire({
+      hooks: [{ on: 'step/end', run: 'echo step' }],
+      history: { enabled: false },
+    })
+    emit({ type: 'step/end', data: { turn: 1, step: 1 } })
+    emit({ type: 'step/end', data: { turn: 1, step: 2 } })
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('turn/start content (#83)', () => {
+  const sessionObj = { id: 's1', header: { cwd: 'C:/tmp' }, events: [] }
+
+  function wire(config: Parameters<typeof apply>[1]) {
+    const { ctx, listeners } = fakeCtx()
+    apply(ctx, config)
+    const sessionEvent = listeners.get('session/event')
+    return { emit: (event: unknown) => sessionEvent?.[0]?.(sessionObj, event) }
+  }
+
+  const spawnEnv = (index: number) => {
+    const [, options] = spawnMock.mock.calls[index] as [string, { env: Record<string, string | undefined> }]
+    return options.env ?? {}
+  }
+
+  const turnStart = { type: 'turn/start', data: { turn: 1 } }
+  const turnEnd = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
+  const userMessage = (text: string, kind = 'user') => ({
+    type: 'user/message',
+    data: { content: [{ type: 'text', text }], source: { kind } },
+  })
+
+  it('defers turn/start until the initiating user message and attaches its text', () => {
+    const { emit } = wire({ hooks: [{ on: 'turn/start', run: 'echo start' }], history: { enabled: false } })
+    emit(turnStart)
+    expect(spawnMock).not.toHaveBeenCalled()
+    emit(userMessage('请修复构建'))
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(spawnEnv(0).DSH_HOOK_CONTENT).toBe('请修复构建')
+    expect(spawnEnv(0).DSH_HOOK_TURN).toBe('1')
+  })
+
+  it('dispatches turn/start without content when the turn has no direct user message', () => {
+    const { emit } = wire({ hooks: [{ on: 'turn/start', run: 'echo start' }], history: { enabled: false } })
+    emit(turnStart)
+    emit(turnEnd)
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(spawnEnv(0).DSH_HOOK_CONTENT).toBeUndefined()
+  })
+
+  it('does not complete the deferred turn/start with synthetic messages', () => {
+    const { emit } = wire({ hooks: [{ on: 'turn/start', run: 'echo start' }], history: { enabled: false } })
+    emit(turnStart)
+    emit(userMessage('注入的上下文', 'agent'))
+    expect(spawnMock).not.toHaveBeenCalled()
+    emit(turnEnd)
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(spawnEnv(0).DSH_HOOK_CONTENT).toBeUndefined()
+  })
+
+  it('flushes an unclaimed turn/start when the next turn begins', () => {
+    const { emit } = wire({ hooks: [{ on: 'turn/start', run: 'echo start' }], history: { enabled: false } })
+    emit(turnStart)
+    emit({ type: 'turn/start', data: { turn: 2 } })
+    expect(spawnMock).toHaveBeenCalledTimes(1) // turn 1 flushed without content
+    expect(spawnEnv(0).DSH_HOOK_CONTENT).toBeUndefined()
+    emit(userMessage('第二回合'))
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    expect(spawnEnv(1).DSH_HOOK_CONTENT).toBe('第二回合')
+  })
+
+  it('keeps immediate dispatch when no turn/start hooks exist', () => {
+    const { emit } = wire({ hooks: [{ on: 'user/message', run: 'echo msg' }], history: { enabled: false } })
+    emit(turnStart)
+    expect(spawnMock).not.toHaveBeenCalled()
+    emit(userMessage('hi'))
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(spawnMock.mock.calls[0]?.[0]).toBe('echo msg')
+  })
+
+  it('caps the attached content at 2000 characters', () => {
+    const { emit } = wire({ hooks: [{ on: 'turn/start', run: 'echo start' }], history: { enabled: false } })
+    emit(turnStart)
+    emit(userMessage('x'.repeat(3000)))
+    expect(spawnEnv(0).DSH_HOOK_CONTENT).toHaveLength(2000)
+  })
+
+  it('dispatches turn/start hooks before user/message hooks of the same message', () => {
+    const { emit } = wire({
+      hooks: [
+        { on: 'turn/start', run: 'echo start' },
+        { on: 'user/message', run: 'echo msg' },
+      ],
+      history: { enabled: false },
+    })
+    emit(turnStart)
+    emit(userMessage('hi'))
+    expect(spawnMock.mock.calls.map(([cmd]) => cmd)).toEqual(['echo start', 'echo msg'])
+  })
+
+  it('matches turn/start hooks against the attached content', () => {
+    const { emit } = wire({
+      hooks: [
+        { on: 'turn/start', match: { content: /修复/ }, run: 'echo hit' },
+        { on: 'turn/start', match: { content: /构建/ }, run: 'echo miss' },
+      ],
+      history: { enabled: false },
+    })
+    emit(turnStart)
+    emit(userMessage('请修复一下'))
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    expect(spawnMock.mock.calls[0]?.[0]).toBe('echo hit')
+  })
+
+  it('does not defer when every turn/start hook is disabled', () => {
+    const { emit } = wire({
+      hooks: [{ on: 'turn/start', run: 'echo start', enabled: false }],
+      history: { enabled: false },
+    })
+    emit(turnStart)
+    emit(userMessage('hi'))
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+})

@@ -30,6 +30,11 @@ export interface HookContext {
     error?: string;
     /** Event content snapshot: turn assistant text, tool result text, … */
     content?: string;
+    /**
+     * Wall-clock tool execution time, ms (tool/result only; undefined when the
+     * pairing tool/call was never seen, e.g. after a plugin restart).
+     */
+    toolDurationMs?: number;
     /** Aggregated token usage of the turn (turn/end), when reported. */
     usageInputTokens?: number;
     usageOutputTokens?: number;

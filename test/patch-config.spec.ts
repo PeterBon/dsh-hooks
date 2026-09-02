@@ -57,6 +57,20 @@ describe('validateHookWire', () => {
     expect(validateHookWire([{ ...runHook, timeoutMs: -1 }])).toContain('timeoutMs')
     expect(validateHookWire([{ ...runHook, retries: Number.NaN }])).toContain('retries')
   })
+
+  it('accepts and validates the per-hook execution options', () => {
+    expect(
+      validateHookWire([{ ...runHook, enabled: false, cwd: 'session', maxConcurrent: 2, debounceMs: 100 }]),
+    ).toBeNull()
+    expect(validateHookWire([{ ...runHook, cwd: 'D:\\work\\demo' }])).toBeNull()
+    expect(validateHookWire([{ ...runHook, maxConcurrent: -1 }])).toContain('maxConcurrent')
+    expect(validateHookWire([{ ...runHook, debounceMs: -5 }])).toContain('debounceMs')
+    expect(validateHookWire([{ ...runHook, cwd: 'relative/path' }])).toContain('cwd')
+  })
+
+  it('accepts comparison string match values', () => {
+    expect(validateHookWire([{ on: 'tool/result', match: { toolDurationMs: '>10000' }, run: 'x' }])).toBeNull()
+  })
 })
 
 describe('patchTextWithHooks', () => {

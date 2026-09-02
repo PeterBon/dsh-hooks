@@ -34,7 +34,7 @@ export interface HookRunRecord {
   command: string
   sessionId?: string
   sessionName?: string
-  outcome: 'spawned' | 'spawn-failed' | 'timeout' | 'exit-0' | 'exit-nonzero' | 'sent' | 'send-failed'
+  outcome: 'spawned' | 'spawn-failed' | 'timeout' | 'exit-0' | 'exit-nonzero' | 'skipped' | 'sent' | 'send-failed'
   exitCode?: number
   durationMs?: number
   /** stderr tail or error message. */

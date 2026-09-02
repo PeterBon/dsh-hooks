@@ -17,6 +17,10 @@ export interface HookDescriptor {
   timeoutMs?: number
   retries?: number
   retryDelayMs?: number
+  enabled?: boolean
+  cwd?: 'session' | string
+  maxConcurrent?: number
+  debounceMs?: number
 }
 
 /** Wire shape the hook editor saves back (string regexes). */
@@ -30,6 +34,10 @@ export interface HookWireSpec {
   timeoutMs?: number
   retries?: number
   retryDelayMs?: number
+  enabled?: boolean
+  cwd?: 'session' | string
+  maxConcurrent?: number
+  debounceMs?: number
 }
 
 export interface HookStats {

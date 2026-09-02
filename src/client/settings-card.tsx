@@ -92,6 +92,10 @@ function hookToYaml(hook: HookWireSpec): string {
   if (hook.timeoutMs !== undefined && hook.timeoutMs !== 10000) lines.push(`  timeoutMs: ${hook.timeoutMs}`)
   if (hook.retries !== undefined && hook.retries !== 0) lines.push(`  retries: ${hook.retries}`)
   if (hook.retryDelayMs !== undefined && hook.retryDelayMs !== 500) lines.push(`  retryDelayMs: ${hook.retryDelayMs}`)
+  if (hook.enabled === false) lines.push('  enabled: false')
+  if (hook.cwd !== undefined && hook.cwd !== '') lines.push(`  cwd: ${q(hook.cwd)}`)
+  if (hook.maxConcurrent !== undefined) lines.push(`  maxConcurrent: ${hook.maxConcurrent}`)
+  if (hook.debounceMs !== undefined) lines.push(`  debounceMs: ${hook.debounceMs}`)
   return lines.join('\n')
 }
 
@@ -129,6 +133,10 @@ function toWire(draft: HookWireSpec): HookWireSpec {
     timeoutMs: draft.timeoutMs,
     retries: draft.retries,
     retryDelayMs: draft.retryDelayMs,
+    enabled: draft.enabled === false ? false : undefined,
+    cwd: draft.cwd === '' ? undefined : draft.cwd,
+    maxConcurrent: draft.maxConcurrent,
+    debounceMs: draft.debounceMs,
   }
 }
 
@@ -324,6 +332,10 @@ export function HooksSettingsCard(_props: object): ReactNode {
         timeoutMs: hook.timeoutMs,
         retries: hook.retries,
         retryDelayMs: hook.retryDelayMs,
+        enabled: hook.enabled,
+        cwd: hook.cwd,
+        maxConcurrent: hook.maxConcurrent,
+        debounceMs: hook.debounceMs,
       })),
     )
     setSaveMessage(null)
@@ -817,7 +829,7 @@ export function HooksSettingsCard(_props: object): ReactNode {
                       className="dh-input"
                       value={pattern}
                       onChange={(e) => patchMatchValue(index, field, e.target.value)}
-                      placeholder="正则（^(rm|git|ssh)）"
+                      placeholder="正则或数值比较（^(rm|git|ssh) / >10000）"
                     />
                     <button type="button" className="dh-button" onClick={() => removeMatch(index, field)}>
                       ×
@@ -862,6 +874,48 @@ export function HooksSettingsCard(_props: object): ReactNode {
                     删除
                   </button>
                 </div>
+                <div className="dh-test-row">
+                  <label className="dh-field">
+                    <span className="dh-field-label">enabled</span>
+                    <select
+                      className="dh-input"
+                      value={hook.enabled === false ? 'false' : 'true'}
+                      onChange={(e) => patchDraft(index, { enabled: e.target.value === 'true' })}
+                    >
+                      <option value="true">启用</option>
+                      <option value="false">停用</option>
+                    </select>
+                  </label>
+                  <label className="dh-field">
+                    <span className="dh-field-label">cwd</span>
+                    <input
+                      className="dh-input"
+                      value={hook.cwd ?? ''}
+                      onChange={(e) => patchDraft(index, { cwd: e.target.value })}
+                      placeholder="session 或绝对路径"
+                    />
+                  </label>
+                  <label className="dh-field">
+                    <span className="dh-field-label">maxConcurrent</span>
+                    <input
+                      className="dh-input"
+                      type="number"
+                      value={hook.maxConcurrent ?? ''}
+                      onChange={(e) => patchDraft(index, { maxConcurrent: parseNum(e.target.value) })}
+                      placeholder="不限"
+                    />
+                  </label>
+                  <label className="dh-field">
+                    <span className="dh-field-label">debounceMs</span>
+                    <input
+                      className="dh-input"
+                      type="number"
+                      value={hook.debounceMs ?? ''}
+                      onChange={(e) => patchDraft(index, { debounceMs: parseNum(e.target.value) })}
+                      placeholder="0"
+                    />
+                  </label>
+                </div>
               </div>
             ))}
             <div className="dh-buttons">
@@ -901,7 +955,9 @@ export function HooksSettingsCard(_props: object): ReactNode {
                 {hook.match !== undefined && Object.keys(hook.match).length > 0 && (
                   <div className="dh-hook-match">
                     {Object.entries(hook.match)
-                      .map(([field, pattern]) => `${field} =~ /${pattern}/`)
+                      .map(([field, pattern]) =>
+                        /^([<>]=?|=)\s*-?\d/.test(pattern) ? `${field} ${pattern}` : `${field} =~ /${pattern}/`,
+                      )
                       .join('，')}
                   </div>
                 )}
@@ -914,7 +970,11 @@ export function HooksSettingsCard(_props: object): ReactNode {
                     {copiedIndex === hook.index ? '已复制 ✓' : '复制 YAML'}
                   </button>
                   <span className="dh-feishu-hint">
+                    {hook.enabled === false ? '已停用 · ' : ''}
                     timeout {hook.timeoutMs ?? 10000}ms · retries {hook.retries ?? 0}
+                    {hook.cwd !== undefined && hook.cwd !== '' ? ` · cwd: ${hook.cwd}` : ''}
+                    {hook.maxConcurrent !== undefined ? ` · 并发≤${hook.maxConcurrent}` : ''}
+                    {hook.debounceMs !== undefined && hook.debounceMs > 0 ? ` · 去抖 ${hook.debounceMs}ms` : ''}
                   </span>
                 </div>
               </div>

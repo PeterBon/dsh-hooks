@@ -7,6 +7,7 @@
  * so a save applies without a restart.
  */
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { isAbsolute } from 'node:path'
 import YAML from 'yaml'
 import { HOOK_EVENTS, TURN_END_REASONS } from './config.js'
 
@@ -21,6 +22,10 @@ export interface HookWireSpec {
   timeoutMs?: number
   retries?: number
   retryDelayMs?: number
+  enabled?: boolean
+  cwd?: 'session' | string
+  maxConcurrent?: number
+  debounceMs?: number
 }
 
 /** Parse a patch list; throws a user-facing error on malformed YAML. */
@@ -66,11 +71,14 @@ export function validateHookWire(hooks: HookWireSpec[]): string | null {
     if (hasNotify && hook.notify!.channel !== 'webhook' && hook.notify!.channel !== 'desktop') {
       return `${label}：无效通知渠道 ${hook.notify!.channel}`
     }
-    for (const key of ['timeoutMs', 'retries', 'retryDelayMs'] as const) {
+    for (const key of ['timeoutMs', 'retries', 'retryDelayMs', 'maxConcurrent', 'debounceMs'] as const) {
       const value = hook[key]
       if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
         return `${label}：${key} 必须是非负数字`
       }
+    }
+    if (hook.cwd !== undefined && hook.cwd !== '' && hook.cwd !== 'session' && !isAbsolute(hook.cwd)) {
+      return `${label}：cwd 必须是 session 或绝对路径（收到 ${hook.cwd}）`
     }
   }
   return null
