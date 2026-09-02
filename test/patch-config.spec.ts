@@ -62,7 +62,8 @@ describe('validateHookWire', () => {
     expect(
       validateHookWire([{ ...runHook, enabled: false, cwd: 'session', maxConcurrent: 2, debounceMs: 100 }]),
     ).toBeNull()
-    expect(validateHookWire([{ ...runHook, cwd: 'D:\\work\\demo' }])).toBeNull()
+    const absoluteCwd = process.platform === 'win32' ? 'D:\\work\\demo' : '/srv/work'
+    expect(validateHookWire([{ ...runHook, cwd: absoluteCwd }])).toBeNull()
     expect(validateHookWire([{ ...runHook, maxConcurrent: -1 }])).toContain('maxConcurrent')
     expect(validateHookWire([{ ...runHook, debounceMs: -5 }])).toContain('debounceMs')
     expect(validateHookWire([{ ...runHook, cwd: 'relative/path' }])).toContain('cwd')
