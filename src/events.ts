@@ -80,9 +80,40 @@ function approvalKey(session: Session, id: unknown): string {
   return `${sessionKey(session)}\u0000${String(id)}`
 }
 
-/** Best-effort access to a session's event log (test fakes may omit it). */
+/**
+ * Best-effort access to a session's event log across harness versions.
+ *
+ * dsh ≤ 0.1.4 exposed the append-only log as a plain `session.events` array.
+ * 0.1.5-rc.1 made that array private (`eventsSnapshot`) and published methods
+ * instead: `snapshotEvents(from?, to?)` (whole log, frozen), `ownEvents()`
+ * (events after a fork-inherited prefix) and `eventAt(seq)`. Reading only the
+ * legacy array silently yielded `[]` there, which blanked the session title,
+ * the turn content and the turn usage at once.
+ *
+ * Preference order: the full snapshot, except for a forked (seeded) session
+ * where the fork-inherited prefix belongs to the parent — then its own events
+ * are the right scope. Legacy arrays still work, and any accessor that throws
+ * degrades to "no log" instead of breaking hook dispatch.
+ */
 function sessionEvents(session: Session): readonly SessionEvent[] {
-  return Array.isArray((session as { events?: unknown }).events) ? session.events : []
+  const candidate = session as unknown as {
+    snapshotEvents?: () => readonly SessionEvent[]
+    ownEvents?: () => readonly SessionEvent[]
+    inheritedEventCount?: unknown
+    events?: unknown
+  }
+  try {
+    if (typeof candidate.snapshotEvents === 'function') {
+      const inherited = typeof candidate.inheritedEventCount === 'number' ? candidate.inheritedEventCount : 0
+      if (inherited > 0 && typeof candidate.ownEvents === 'function') return candidate.ownEvents()
+      return candidate.snapshotEvents()
+    }
+    if (typeof candidate.ownEvents === 'function') return candidate.ownEvents()
+    if (Array.isArray(candidate.events)) return candidate.events as readonly SessionEvent[]
+  } catch {
+    // A hostile/broken accessor must never break hook dispatch.
+  }
+  return []
 }
 
 /** Concatenate the text blocks of a message's content, or undefined. */

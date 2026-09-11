@@ -659,3 +659,72 @@ describe('matchFilters', () => {
     expect(matchFilters({ turn: {} }, { event: 'turn/end', timestamp: 'T' })).toBe(false)
   })
 })
+
+describe('session event-log compatibility (#101)', () => {
+  const titleEvent = (title: string) =>
+    ({ type: 'session/title', seq: 1, time: 1, data: { title, messageSeqs: [], source: { kind: 'user' } } }) as never
+  const assistantMessage = (seq: number, turn: number, text: string) =>
+    ({
+      type: 'assistant/message',
+      seq,
+      time: 1,
+      data: {
+        turn,
+        step: seq,
+        message: { id: `a${seq}`, role: 'assistant', content: [textBlock(text)], source: { kind: 'model' } },
+        usage: { inputTokens: 10, outputTokens: 5 },
+      },
+    }) as never
+
+  it('reads the 0.1.5-rc.1 snapshotEvents() API (no legacy events array)', () => {
+    const events = [titleEvent('新 API 标题'), assistantMessage(2, 1, 'snapshot 正文')]
+    const session = { id: 's1', header: { cwd: 'D:/x' }, snapshotEvents: () => events } as never
+    expect(sessionTitle(session)).toBe('新 API 标题')
+    expect(turnContent(session, 1)).toBe('snapshot 正文')
+    expect(turnUsage(session, 1)).toEqual({ inputTokens: 10, outputTokens: 5 })
+  })
+
+  it('prefers ownEvents() for a forked session with an inherited prefix', () => {
+    const inherited = [titleEvent('父会话标题'), assistantMessage(1, 1, '父会话正文')]
+    const own = [assistantMessage(2, 1, '子会话正文')]
+    let snapshotCalls = 0
+    let ownCalls = 0
+    const session = {
+      id: 'sub',
+      header: {},
+      inheritedEventCount: 2,
+      snapshotEvents: () => {
+        snapshotCalls += 1
+        return [...inherited, ...own]
+      },
+      ownEvents: () => {
+        ownCalls += 1
+        return own
+      },
+    } as never
+    expect(turnContent(session, 1)).toBe('子会话正文')
+    expect(ownCalls).toBeGreaterThan(0)
+    expect(snapshotCalls).toBe(0)
+  })
+
+  it('falls back to the legacy events array, then to no log at all', () => {
+    expect(sessionTitle(fakeSession('s1', [titleEvent('旧 API 标题')]))).toBe('旧 API 标题')
+    const bare = { id: 's2', header: {} } as never
+    expect(sessionTitle(bare)).toBeUndefined()
+    expect(turnContent(bare, 1)).toBeUndefined()
+    expect(turnUsage(bare, 1)).toBeUndefined()
+  })
+
+  it('survives a throwing accessor', () => {
+    const hostile = {
+      id: 's3',
+      header: {},
+      snapshotEvents: () => {
+        throw new Error('boom')
+      },
+    } as never
+    expect(sessionTitle(hostile)).toBeUndefined()
+    expect(turnContent(hostile, 1)).toBeUndefined()
+    expect(turnUsage(hostile, 1)).toBeUndefined()
+  })
+})
