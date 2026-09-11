@@ -107,6 +107,7 @@ Every hook field:
 | `agent/error` | The agent loop reports an error | error text |
 | `agent/status` | Agent status transition | status |
 | `hook/failed` | A hook fails consecutively past `failedAlertThreshold` (default 3; synthetic, emitted from the outcome stream) | failing hook summary, consecutive failure count |
+| `usage/daily` | The first event after the local calendar day rolls over (synthetic, no timers): reports the token usage of the day that just ended | covered day, turns that day, contributing sessions, day's token totals |
 
 The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `error`, …). Hooks for other events run unconditionally.
 
@@ -134,11 +135,11 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_STATUS` | agent status (`agent/status`) |
 | `DSH_HOOK_ERROR` | error text (`agent/error`, and the failure message on `turn/end` error) |
 | `DSH_HOOK_CONTENT` | event content snapshot: turn assistant text, tool result text, user message text, turn-initiating message text (turn/start) |
-| `DSH_HOOK_USAGE_INPUT_TOKENS` | aggregated input tokens of the turn (turn/end, summed across steps) |
-| `DSH_HOOK_USAGE_OUTPUT_TOKENS` | aggregated output tokens of the turn |
-| `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | aggregated cache-read tokens, when reported |
-| `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | aggregated cache-write tokens, when reported |
-| `DSH_HOOK_USAGE_REASONING_TOKENS` | aggregated reasoning tokens, when reported |
+| `DSH_HOOK_USAGE_INPUT_TOKENS` | input token total (turn/end: this turn, summed across steps; usage/daily: the whole day) |
+| `DSH_HOOK_USAGE_OUTPUT_TOKENS` | output token total (same scoping) |
+| `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | cache-read tokens when reported (same scoping) |
+| `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | cache-write tokens when reported (same scoping) |
+| `DSH_HOOK_USAGE_REASONING_TOKENS` | reasoning tokens when reported (same scoping) |
 | `DSH_HOOK_RUNNING_SUBAGENTS` | live subagents still running under this session (turn/end; `0` = none — lets a hook tell "work handed off to background subagents" apart from "the turn finished for real") |
 | `DSH_HOOK_PARENT_SESSION_ID` | parent session id (subagent lineage; absent for top-level sessions) |
 | `DSH_HOOK_SUBAGENT` | `1` when the session is a subagent child, `0` otherwise |
@@ -151,6 +152,9 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_TREE_DURATION_MS` | parent turn/end → tree settle duration, ms (`tree/settled`) |
 | `DSH_HOOK_FAILED_HOOK` | identity summary of the hook that failed consecutively (`hook/failed`) |
 | `DSH_HOOK_FAILURES` | consecutive failure count when the alert fired (`hook/failed`) |
+| `DSH_HOOK_USAGE_DAY` | local calendar day the token totals cover, `YYYY-MM-DD` (`usage/daily`) |
+| `DSH_HOOK_USAGE_TURNS` | turns with reported accounting that day (`usage/daily`) |
+| `DSH_HOOK_USAGE_SESSIONS` | distinct sessions that contributed usage that day (`usage/daily`) |
 | `DSH_HOOK_TIMESTAMP` | ISO timestamp |
 
 - `{{var}}` placeholders inside `run` are substituted from the same context, e.g. `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`.
@@ -183,6 +187,26 @@ For the simpler "notify only once the whole tree settles" pattern, the synthetic
 ```
 
 Settled-but-idle continuable children do not count as running, so they don't keep suppressing the notification. The settle watch is event-driven and best-effort: it survives until the plugin restarts, and a failed re-check drops the watch silently (no late notification).
+
+### usage/daily: the cross-day token report
+
+`turn/end` answers "what did this turn cost". For a per-day view, use the synthetic `usage/daily` event: the plugin accumulates every reported `turn/end` usage in memory per **local calendar day** (subagent sessions included — same account), and when the day rolls over it emits one report for the day that just ended, on the next event that arrives. Detection is purely event-driven: no timers, no scheduled tasks.
+
+```yaml
+- on: 'usage/daily'
+  match: { usageInputTokens: '>0' }     # optional: skip days without usage
+  run: 'node examples/log-usage.mjs'    # or notify: { channel: 'webhook', url: '…' }
+```
+
+`DSH_HOOK_USAGE_DAY` is the day the report covers (`YYYY-MM-DD`); `DSH_HOOK_USAGE_TURNS` / `DSH_HOOK_USAGE_SESSIONS` are that day's counted turns and contributing sessions; the token details reuse the `turn/end` variable names (`usageInputTokens` / `usageOutputTokens` / `usageCacheReadTokens` / `usageCacheWriteTokens` / `usageReasoningTokens`) with day scope instead of turn scope.
+
+Three boundaries by design, not bugs:
+
+- **In-memory**: a plugin-process restart drops the day in progress (the new process starts a fresh day at zero); reports already emitted are unaffected.
+- **Event-driven, not timed**: a day is reported when the next event arrives, so after a quiet midnight the report waits for the next event; a day with no reported turn usage is never reported (an empty report is noise).
+- **Zero cost when unused**: with no `usage/daily` hook declared, no accumulation and no day check happen at all.
+
+`dsh-hooks dry-run usage/daily` simulates a report for "yesterday" with non-zero tokens, so match filters and the command can be verified first.
 
 ### Numeric match comparisons
 

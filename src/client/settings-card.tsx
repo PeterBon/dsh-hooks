@@ -35,14 +35,20 @@ import {
 // Card styles are injected once at apply time (settings-card.module.css?inline
 // in index.ts); every class name below is a stable dh-* literal.
 
+// Every event the config schema accepts, in HOOK_EVENTS order — the editor
+// select must be able to show an existing hook's `on` value, and the tester
+// must be able to simulate one (including the synthetic events, which have no
+// session-log counterpart).
 const EVENTS = [
   'turn/start',
   'turn/end',
+  'tree/settled',
   'step/end',
   'tool/call',
   'tool/result',
   'user/message',
   'approval/asked',
+  'approval/decided',
   'session/title',
   'session/created',
   'session/disposed',
@@ -50,6 +56,8 @@ const EVENTS = [
   'agent/disposed',
   'agent/error',
   'agent/status',
+  'hook/failed',
+  'usage/daily',
 ]
 
 const TURN_END_REASONS = ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted']

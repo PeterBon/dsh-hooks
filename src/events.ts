@@ -1,7 +1,10 @@
 import type { Session, SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session'
 import type { HookContext } from './context.js'
 import type { HookSpec, NumericMatch, TurnEndReasonKind } from './config.js'
+import type { DailyUsageTotals, UsageTotals } from './usage.js'
 import type { AgentLike } from './types.js'
+
+export type { UsageTotals } from './usage.js'
 
 /** `approval/asked` payload (merge-extensible, declared by dsh-user-approval). */
 export interface ApprovalAskedData {
@@ -146,15 +149,6 @@ export function turnContent(session: Session, turn: number): string | undefined 
 
 /** Structural token accounting (disjoint counts; cache fields optional). */
 interface UsageLike {
-  inputTokens: number
-  outputTokens: number
-  cacheReadTokens?: number
-  cacheWriteTokens?: number
-  reasoningTokens?: number
-}
-
-/** Aggregated turn usage for hook contexts (only fields actually reported). */
-export interface UsageTotals {
   inputTokens: number
   outputTokens: number
   cacheReadTokens?: number
@@ -494,6 +488,35 @@ export function hookFailedContext(origin: HookContext, hookFailedHook: string, h
     cwd: origin.cwd,
     hookFailedHook,
     hookFailures,
+    timestamp: new Date().toISOString(),
+  }
+}
+
+/**
+ * Synthetic `usage/daily` context: the local calendar day that just ended,
+ * with its aggregated token usage. Emitted by index.ts when the day rolls
+ * over (detected from ordinary event traffic — no timers); `origin` supplies
+ * the session identity of the event that triggered the report.
+ *
+ * The token fields reuse the `turn/end` names on purpose: a hook reads the
+ * same variables, with the day's aggregate instead of one turn's.
+ */
+export function usageDailyContext(origin: HookContext, totals: DailyUsageTotals): HookContext {
+  return {
+    event: 'usage/daily',
+    sessionId: origin.sessionId,
+    sessionName: origin.sessionName,
+    cwd: origin.cwd,
+    usageDay: totals.day,
+    usageTurns: totals.turns,
+    usageSessions: totals.sessions,
+    usageInputTokens: totals.inputTokens,
+    usageOutputTokens: totals.outputTokens,
+    // Only fields some turn actually reported: an absent variable is easier to
+    // reason about (and to match on) than one that is present-but-undefined.
+    ...(totals.cacheReadTokens !== undefined ? { usageCacheReadTokens: totals.cacheReadTokens } : {}),
+    ...(totals.cacheWriteTokens !== undefined ? { usageCacheWriteTokens: totals.cacheWriteTokens } : {}),
+    ...(totals.reasoningTokens !== undefined ? { usageReasoningTokens: totals.reasoningTokens } : {}),
     timestamp: new Date().toISOString(),
   }
 }

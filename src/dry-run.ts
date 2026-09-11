@@ -10,6 +10,7 @@ import YAML from 'yaml'
 import { Config, type HookSpec, type TurnEndReasonKind } from './config.js'
 import { matchFilters } from './events.js'
 import type { HookContext } from './context.js'
+import { localDayKey } from './usage.js'
 import { createHookRunner } from './runner.js'
 import { fireNotify } from './notify.js'
 
@@ -48,7 +49,7 @@ export function loadHooks(profile: string, paths: { patchFile?: string } = {}): 
 
 /** A synthetic context for the simulated event, overridable per field. */
 export function mockContext(event: string, overrides: Partial<HookContext> = {}): HookContext {
-  return {
+  const ctx: HookContext = {
     event,
     sessionId: 'dry-run',
     sessionName: 'dry-run 会话',
@@ -59,8 +60,21 @@ export function mockContext(event: string, overrides: Partial<HookContext> = {})
     callId: 'dry-run-call',
     content: 'dry-run 模拟内容',
     timestamp: new Date().toISOString(),
-    ...overrides,
   }
+  if (event === 'usage/daily') {
+    // A daily report always describes a day that already ended, and the
+    // simulated numbers must be non-zero so `match` filters on them (e.g.
+    // `{ usageInputTokens: '>0' }`) are actually exercisable.
+    ctx.usageDay = localDayKey(new Date(Date.now() - 86_400_000))
+    ctx.usageTurns = 12
+    ctx.usageSessions = 3
+    ctx.usageInputTokens = 120_000
+    ctx.usageOutputTokens = 45_000
+    ctx.usageCacheReadTokens = 90_000
+    ctx.usageCacheWriteTokens = 6_000
+    ctx.usageReasoningTokens = 8_000
+  }
+  return { ...ctx, ...overrides }
 }
 
 export interface DryRunLine {

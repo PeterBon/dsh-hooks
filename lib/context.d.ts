@@ -35,7 +35,7 @@ export interface HookContext {
      * pairing tool/call was never seen, e.g. after a plugin restart).
      */
     toolDurationMs?: number;
-    /** Aggregated token usage of the turn (turn/end), when reported. */
+    /** Aggregated token usage of the turn (turn/end), or of the day (usage/daily). */
     usageInputTokens?: number;
     usageOutputTokens?: number;
     usageCacheReadTokens?: number;
@@ -69,6 +69,15 @@ export interface HookContext {
     hookFailedHook?: string;
     /** Consecutive failure count when the alert fired (hook/failed). */
     hookFailures?: number;
+    /**
+     * Local calendar day (`YYYY-MM-DD`) the token totals below cover
+     * (usage/daily only; turn/end carries a single turn, not a day).
+     */
+    usageDay?: string;
+    /** Turns with reported accounting that day (usage/daily). */
+    usageTurns?: number;
+    /** Distinct sessions that contributed usage that day (usage/daily). */
+    usageSessions?: number;
     timestamp: string;
 }
 export declare function toEnv(ctx: HookContext): Record<string, string>;

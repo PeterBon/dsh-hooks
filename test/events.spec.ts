@@ -19,6 +19,7 @@ import {
   turnEndContext,
   turnStartContext,
   turnUsage,
+  usageDailyContext,
 } from '../src/events.js'
 
 // Minimal structural fakes for the session/event shapes this module consumes.
@@ -399,6 +400,33 @@ describe('context builders', () => {
   it('approvalContext is idempotent', () => {
     const ctx = approvalContext(fakeSession('s3'), { id: 'q1', toolName: 'ssh_exec' })
     expect(ctx).toMatchObject({ event: 'approval/asked', tool: 'ssh_exec' })
+  })
+
+  it('usageDailyContext carries the day aggregate on the origin session', () => {
+    const origin = { event: 'turn/end', sessionId: 's1', sessionName: '日报', cwd: 'D:/work', timestamp: 'T' }
+    const ctx = usageDailyContext(origin, {
+      day: '2026-09-01',
+      inputTokens: 130,
+      outputTokens: 70,
+      cacheReadTokens: 500,
+      turns: 4,
+      sessions: 2,
+    })
+    expect(ctx).toMatchObject({
+      event: 'usage/daily',
+      sessionId: 's1',
+      sessionName: '日报',
+      cwd: 'D:/work',
+      usageDay: '2026-09-01',
+      usageTurns: 4,
+      usageSessions: 2,
+      usageInputTokens: 130,
+      usageOutputTokens: 70,
+      usageCacheReadTokens: 500,
+    })
+    // Unreported optional fields stay absent instead of becoming undefined keys.
+    expect('usageCacheWriteTokens' in ctx).toBe(false)
+    expect('usageReasoningTokens' in ctx).toBe(false)
   })
 })
 

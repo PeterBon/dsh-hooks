@@ -1,7 +1,9 @@
 import type { Session, SessionEvent, TurnEndReason } from '@deepseek-ai/dsh-session';
 import type { HookContext } from './context.js';
 import type { HookSpec, NumericMatch, TurnEndReasonKind } from './config.js';
+import type { DailyUsageTotals, UsageTotals } from './usage.js';
 import type { AgentLike } from './types.js';
+export type { UsageTotals } from './usage.js';
 /** `approval/asked` payload (merge-extensible, declared by dsh-user-approval). */
 export interface ApprovalAskedData {
     id: string;
@@ -65,14 +67,6 @@ export declare function sessionTitle(session: Session): string | undefined;
  * their own display truncation.
  */
 export declare function turnContent(session: Session, turn: number): string | undefined;
-/** Aggregated turn usage for hook contexts (only fields actually reported). */
-export interface UsageTotals {
-    inputTokens: number;
-    outputTokens: number;
-    cacheReadTokens?: number;
-    cacheWriteTokens?: number;
-    reasoningTokens?: number;
-}
 /**
  * Sum the `usage` of every `assistant/message` of a turn. Steps without
  * reported accounting are skipped; returns undefined when no step reported
@@ -128,6 +122,16 @@ export declare function treeSettledContext(session: Session, totalSubagents: num
  * session identity of the event that triggered the failing hook.
  */
 export declare function hookFailedContext(origin: HookContext, hookFailedHook: string, hookFailures: number): HookContext;
+/**
+ * Synthetic `usage/daily` context: the local calendar day that just ended,
+ * with its aggregated token usage. Emitted by index.ts when the day rolls
+ * over (detected from ordinary event traffic — no timers); `origin` supplies
+ * the session identity of the event that triggered the report.
+ *
+ * The token fields reuse the `turn/end` names on purpose: a hook reads the
+ * same variables, with the day's aggregate instead of one turn's.
+ */
+export declare function usageDailyContext(origin: HookContext, totals: DailyUsageTotals): HookContext;
 export declare function agentCreatedContext(agent: AgentLike): HookContext;
 export declare function agentDisposedContext(agent: AgentLike): HookContext;
 export declare function agentErrorContext(agent: AgentLike, turn: number | undefined, error: unknown): HookContext;
