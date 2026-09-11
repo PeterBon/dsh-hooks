@@ -951,3 +951,61 @@ describe('usage/daily wiring', () => {
     expect(spawnMock).not.toHaveBeenCalled()
   })
 })
+
+describe('notify retry wiring (#95)', () => {
+  const session = { id: 'session-main', header: { cwd: 'C:/tmp' }, events: [] }
+  const message = { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } } }
+
+  function wireNotify(config: Parameters<typeof apply>[1]) {
+    const { ctx, listeners } = fakeCtx({})
+    apply(ctx, config)
+    return () => listeners.get('session/event')?.[0]?.(session, message)
+  }
+
+  /** Poll until `done()` holds (notify dispatch is a floating promise chain). */
+  async function waitFor(done: () => boolean, timeoutMs = 500): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (done()) return true
+      await new Promise((resolve) => setTimeout(resolve, 5))
+    }
+    return done()
+  }
+
+  it('passes the hook retries and delay to the webhook channel', async () => {
+    const fetchMock = vi.fn().mockRejectedValueOnce(new Error('ECONNRESET')).mockResolvedValueOnce({ ok: true })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const emit = wireNotify({
+        hooks: [{ on: 'user/message', notify: { channel: 'webhook', url: 'https://x' }, retries: 1, retryDelayMs: 0 }],
+        history: { enabled: false },
+      })
+      emit()
+      expect(await waitFor(() => fetchMock.mock.calls.length >= 2)).toBe(true)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('keeps the single attempt default for hooks without retries', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('down'))
+    vi.stubGlobal('fetch', fetchMock)
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const emit = wireNotify({
+        hooks: [{ on: 'user/message', notify: { channel: 'webhook', url: 'https://x' } }],
+        history: { enabled: false },
+      })
+      emit()
+      expect(await waitFor(() => fetchMock.mock.calls.length >= 1)).toBe(true)
+      // No retry budget means no pending timer at all: this sleep is decisive.
+      await new Promise((resolve) => setTimeout(resolve, 30))
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(warn).toHaveBeenCalled()
+    } finally {
+      warn.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+})

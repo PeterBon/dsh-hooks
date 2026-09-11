@@ -125,7 +125,7 @@ export { createHistorySink } from './history.js'
  * exists (web profile). Tells agents the plugin exists and how to cooperate.
  */
 export const DSH_HOOKS_GUIDANCE =
-  '本机已安装 dsh-hooks 插件（DeepSeek Harness 配置驱动生命周期 hooks）：可在 profile 的 cordis.patch.yml 声明「事件 → 命令/通知」的 hook（turn/start、turn/end、tree/settled、step/end、tool/call、tool/result、user/message、approval/asked、approval/decided、session/title、session/created、session/disposed、agent/created、agent/disposed、agent/error、agent/status、hook/failed、usage/daily 共 18 类事件），支持 when 原因过滤、match 字段正则/数值比较过滤（如 \'>10000\'）、stdin JSON 输入、opt-in 重试、执行选项（enabled 停用 / cwd 工作目录 / maxConcurrent + debounceMs 防高频风暴）、内置 webhook/desktop 通知渠道；执行历史记录于 ~/.dsh/dsh-hooks/history.jsonl；`dsh-hooks dry-run <event>` 可模拟事件验证配置。用户提到「hooks / 钩子 / 生命周期 / 通知配置」时即指本插件，请据此协作。'
+  '本机已安装 dsh-hooks 插件（DeepSeek Harness 配置驱动生命周期 hooks）：可在 profile 的 cordis.patch.yml 声明「事件 → 命令/通知」的 hook（turn/start、turn/end、tree/settled、step/end、tool/call、tool/result、user/message、approval/asked、approval/decided、session/title、session/created、session/disposed、agent/created、agent/disposed、agent/error、agent/status、hook/failed、usage/daily 共 18 类事件），支持 when 原因过滤、match 字段正则/数值比较过滤（如 \'>10000\'）、stdin JSON 输入、opt-in 重试、执行选项（enabled 停用 / cwd 工作目录 / maxConcurrent + debounceMs 防高频风暴）、内置 webhook/desktop 通知渠道；执行历史记录于 ~/.dsh/dsh-hooks/history.jsonl，`dsh-hooks tail` 可实时跟踪、`dsh-hooks dry-run <event>` 可模拟事件（含 runningSubagents/usage 等数值字段）验证配置。用户提到「hooks / 钩子 / 生命周期 / 通知配置」时即指本插件，请据此协作。'
 
 export function apply(ctx: Context, config: Config = {}) {
   const hooks: readonly HookSpec[] = config.hooks ?? []
@@ -233,7 +233,12 @@ export function apply(ctx: Context, config: Config = {}) {
       }
     }
     if (hook.notify) {
-      void fireNotify(hook.notify, ctxValue, track)
+      // Retries ride the same per-hook options as `run` (webhook channel only;
+      // the desktop channel is a local spawn and never retries).
+      void fireNotify(hook.notify, ctxValue, track, {
+        retries: hook.retries,
+        retryDelayMs: hook.retryDelayMs,
+      })
       return
     }
     if (hook.run) {

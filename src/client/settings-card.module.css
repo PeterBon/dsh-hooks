@@ -168,6 +168,32 @@
   padding: 6px 2px;
 }
 
+/* History filter bar: the tester's field vocabulary, but it wraps — the
+   settings panel is narrow and carries four controls plus two buttons. */
+.dh-history-filters {
+  flex-wrap: wrap;
+  align-items: flex-end;
+  margin-bottom: 6px;
+}
+
+.dh-history-filters .dh-buttons {
+  flex: 0 0 auto;
+}
+
+.dh-history-count {
+  color: var(--dsh-hooks-muted);
+  font-size: 11px;
+  padding: 0 2px 6px;
+}
+
+.dh-record-session {
+  color: var(--dsh-hooks-muted);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .dh-test-form {
   display: flex;
   flex-direction: column;

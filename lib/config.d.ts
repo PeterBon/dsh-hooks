@@ -65,8 +65,10 @@ export interface HookSpec {
     /** Per-hook timeout in milliseconds. Defaults to 10000. */
     timeoutMs?: number;
     /**
-     * Retry count for non-zero exit codes (default 0: fire-and-forget,
-     * never retried). Spawn failures and timeouts are never retried.
+     * Retry count for retryable failures (default 0: fire-and-forget, never
+     * retried). `run`: non-zero exit codes only — spawn failures and timeouts
+     * are never retried. `notify` (webhook): transport failures and HTTP
+     * 408/429/5xx; the desktop channel never retries.
      */
     retries?: number;
     /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */

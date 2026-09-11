@@ -158,6 +158,32 @@ describe('createHookHandler', () => {
     expect(value.lines.map((l) => l.matched)).toEqual([true, false])
   })
 
+  it('simulates numeric context fields on POST /dsh-hooks/test', async () => {
+    const scoped = [
+      { on: 'turn/end', match: { runningSubagents: { eq: 0 } }, run: 'echo idle' },
+      { on: 'turn/end', match: { runningSubagents: { gt: 0 } }, run: 'echo busy' },
+    ] as HookSpec[]
+    const handler = createHookHandler({ hooks: scoped, history: createHistorySink({ enabled: false }) })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/test', { event: 'turn/end', fields: { runningSubagents: 2 } }), res)
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(200)
+    const value = (body as { value: { matched: number; fields: Record<string, number>; lines: { matched: boolean }[] } }).value
+    expect(value.fields.runningSubagents).toBe(2)
+    expect(value.lines.map((l) => l.matched)).toEqual([false, true])
+  })
+
+  it('rejects fields that cannot be simulated', async () => {
+    const handler = createHookHandler({ hooks: [], history: createHistorySink({ enabled: false }) })
+    for (const fields of [{ nope: 1 }, { runningSubagents: 'zero' }, [1, 2]]) {
+      const res = fakeRes()
+      await handler(bodyReq('/dsh-hooks/test', { event: 'turn/end', fields }), res)
+      const { statusCode, body } = readJson(res)
+      expect(statusCode).toBe(400)
+      expect(JSON.stringify(body)).toContain('bad-request')
+    }
+  })
+
   it('rejects non-loopback clients', async () => {
     const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
     const res = fakeRes()

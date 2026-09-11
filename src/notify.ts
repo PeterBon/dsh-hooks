@@ -9,6 +9,7 @@ import type { HookContext } from './context.js'
 import { eventLabel } from './context.js'
 import type { NotifySpec } from './config.js'
 import type { HookRunRecord } from './history.js'
+import { DEFAULT_RETRY_DELAY_MS } from './runner.js'
 
 export interface NotifyResult {
   ok: boolean
@@ -17,8 +18,39 @@ export interface NotifyResult {
 
 export type NotifyRecord = (record: Omit<HookRunRecord, 'ts'>) => void
 
+/**
+ * Retry policy for the built-in notify channels — the same two knobs the
+ * `run` channel takes, resolved from the hook declaration by the caller.
+ */
+export interface NotifyRetryOptions {
+  /** Retries after the first attempt. Defaults to 0 (one attempt, never retried). */
+  retries?: number
+  /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
+  retryDelayMs?: number
+  /** Retry progress lines (defaults to `console.warn`). */
+  log?: (line: string) => void
+}
+
 /** Fetch timeout for webhook sends (ms). */
 export const NOTIFY_TIMEOUT_MS = 10000
+
+/**
+ * HTTP statuses worth retrying: rate limiting, request timeout, and
+ * server-side failures (a cold endpoint answering 502/503 is the classic
+ * case). Any other 4xx means the request itself is wrong — retrying it can
+ * only waste time.
+ */
+export function isRetryableStatus(status: number): boolean {
+  return status === 408 || status === 429 || status >= 500
+}
+
+/** Sleep without holding the event loop open (retries never outlive the plugin). */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms)
+    timer.unref?.()
+  })
+}
 
 /** One-line summary for Slack-style and desktop notifications. */
 export function summarizeContext(ctx: HookContext): string {
@@ -82,14 +114,25 @@ export function webhookPayload(ctx: HookContext): Record<string, unknown> {
 }
 
 /**
- * POST the context to a webhook endpoint. One retry on transport failure
- * (webhook endpoints often drop the first request when cold). The URL comes
- * from `spec.url` or the `DSH_HOOKS_WEBHOOK_URL` environment variable.
+ * POST the context to a webhook endpoint, honouring the hook's
+ * `retries` / `retryDelayMs` exactly like the `run` channel: up to
+ * `retries` extra attempts after the first one, with the delay doubling per
+ * attempt. Retryable failures are transport errors (connection reset,
+ * timeout) and HTTP 408/429/5xx. The URL comes from `spec.url` or the
+ * `DSH_HOOKS_WEBHOOK_URL` environment variable.
  */
-export async function sendWebhook(spec: NotifySpec, ctx: HookContext, env: NodeJS.ProcessEnv = process.env): Promise<NotifyResult> {
+export async function sendWebhook(
+  spec: NotifySpec,
+  ctx: HookContext,
+  env: NodeJS.ProcessEnv = process.env,
+  retry: NotifyRetryOptions = {},
+): Promise<NotifyResult> {
   const url = spec.url || env.DSH_HOOKS_WEBHOOK_URL
   if (!url) return { ok: false, error: '缺少 webhook URL（notify.url 或 DSH_HOOKS_WEBHOOK_URL）' }
   const body = spec.slack ? { text: summarizeContext(ctx) } : webhookPayload(ctx)
+  const retries = Math.max(0, retry.retries ?? 0)
+  const baseDelay = Math.max(0, retry.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
+  const log = retry.log ?? ((line: string) => console.warn(line))
   const attempt = async (): Promise<Response> => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
@@ -104,19 +147,29 @@ export async function sendWebhook(spec: NotifySpec, ctx: HookContext, env: NodeJ
       clearTimeout(timer)
     }
   }
-  let response: Response
-  try {
-    response = await attempt()
-  } catch (error) {
+  // Attempt loop: `retries` counts the attempts AFTER the first one, so the
+  // total is `1 + retries` — identical to the run channel's semantics.
+  for (let attemptNumber = 0; ; attemptNumber++) {
+    let failure: string
+    let retryable: boolean
     try {
-      response = await attempt()
-    } catch (retryError) {
-      const cause = retryError instanceof Error ? retryError.message : String(retryError)
-      return { ok: false, error: `webhook 请求失败（重试后仍失败）: ${cause}` }
+      const response = await attempt()
+      if (response.ok) return { ok: true }
+      failure = `webhook 响应 HTTP ${response.status}`
+      retryable = isRetryableStatus(response.status)
+    } catch (error) {
+      failure = `webhook 请求失败: ${error instanceof Error ? error.message : String(error)}`
+      // Transport failures are always worth another attempt.
+      retryable = true
     }
+    const attempts = attemptNumber + 1
+    if (!retryable || attempts > retries) {
+      return { ok: false, error: attempts > 1 ? `${failure}（${attempts} 次尝试后仍失败）` : failure }
+    }
+    const delay = baseDelay * 2 ** attemptNumber
+    log(`[dsh-hooks] 通知发送失败（${failure}），${delay}ms 后重试（${attempts}/${retries}）：${eventLabel(ctx)}`)
+    await sleep(delay)
   }
-  if (!response.ok) return { ok: false, error: `webhook 响应 HTTP ${response.status}` }
-  return { ok: true }
 }
 
 /**
@@ -179,10 +232,19 @@ function runAndWait(argv: string[], env: Record<string, string>, timeoutMs: numb
   })
 }
 
-/** Fire a built-in notification; failures only warn and surface in the result. */
-export async function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord): Promise<NotifyResult> {
+/**
+ * Fire a built-in notification; failures only warn and surface in the result.
+ * `retry` carries the hook's `retries` / `retryDelayMs` — honoured by the
+ * webhook channel; the desktop channel is a local spawn and never retries.
+ */
+export async function fireNotify(
+  spec: NotifySpec,
+  ctx: HookContext,
+  record?: NotifyRecord,
+  retry: NotifyRetryOptions = {},
+): Promise<NotifyResult> {
   const startedAt = Date.now()
-  const result = spec.channel === 'webhook' ? await sendWebhook(spec, ctx) : await sendDesktop(spec, ctx)
+  const result = spec.channel === 'webhook' ? await sendWebhook(spec, ctx, process.env, retry) : await sendDesktop(spec, ctx)
   if (!result.ok) {
     console.warn(`[dsh-hooks] 通知发送失败 (${eventLabel(ctx)}): ${result.error}`)
     record?.({

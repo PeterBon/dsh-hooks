@@ -3,7 +3,10 @@ import {
   fetchFeishuStatus,
   fetchHistory,
   fetchStatus,
+  filterHistory,
   formatTime,
+  historyExportName,
+  historyToJsonl,
   outcomeLabel,
   outcomeTone,
   postFeishuCancel,
@@ -14,6 +17,7 @@ import {
   postHooksSave,
   postNotifyTest,
   postTest,
+  type HistoryRecord,
 } from '../src/client/api.ts'
 
 function jsonResponse(body: unknown, ok = true, status = 200) {
@@ -226,5 +230,66 @@ describe('hook editor / notify test / disconnect API', () => {
     expect(result).toMatchObject({ ok: true, disconnected: true, removedHooks: true })
     const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
     expect(JSON.parse(init.body)).toEqual({ profile: 'web', removeHooks: true })
+  })
+})
+
+describe('postTest fields', () => {
+  it('sends the numeric simulation fields', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(
+      jsonResponse({ ok: true, value: { event: 'turn/end', fields: { runningSubagents: 2 }, executed: false, total: 0, matched: 0, lines: [] } }),
+    )
+    const result = await postTest(
+      { event: 'turn/end', fields: { runningSubagents: 2 } },
+      fetchFn as unknown as typeof fetch,
+    )
+    expect(result?.fields).toEqual({ runningSubagents: 2 })
+    const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ event: 'turn/end', fields: { runningSubagents: 2 } })
+  })
+})
+
+describe('filterHistory', () => {
+  const records: HistoryRecord[] = [
+    { ts: 1, kind: 'run', event: 'turn/end', command: 'a', outcome: 'exit-0', sessionId: 'sess-1', sessionName: '修复构建' },
+    { ts: 2, kind: 'run', event: 'turn/end', command: 'b', outcome: 'exit-nonzero', sessionId: 'sess-2', sessionName: '发布 0.12.0' },
+    { ts: 3, kind: 'notify', event: 'tool/call', command: 'notify:webhook', outcome: 'send-failed', sessionId: 'sess-1' },
+  ]
+
+  it('keeps everything without a filter', () => {
+    expect(filterHistory(records, {})).toHaveLength(3)
+    expect(filterHistory(records, { event: '', outcome: '', session: '  ' })).toHaveLength(3)
+  })
+
+  it('ANDs event, outcome and case-insensitive session matching', () => {
+    expect(filterHistory(records, { event: 'turn/end' }).map((r) => r.command)).toEqual(['a', 'b'])
+    expect(filterHistory(records, { outcome: 'send-failed' }).map((r) => r.command)).toEqual(['notify:webhook'])
+    expect(filterHistory(records, { session: 'SESS-1' }).map((r) => r.command)).toEqual(['a', 'notify:webhook'])
+    expect(filterHistory(records, { session: '发布' }).map((r) => r.command)).toEqual(['b'])
+    expect(filterHistory(records, { event: 'turn/end', outcome: 'exit-0' }).map((r) => r.command)).toEqual(['a'])
+    expect(filterHistory(records, { event: 'turn/end', session: 'sess-2' }).map((r) => r.command)).toEqual(['b'])
+    expect(filterHistory(records, { event: 'step/end' })).toEqual([])
+  })
+})
+
+describe('history export', () => {
+  const records: HistoryRecord[] = [
+    { ts: 1, kind: 'run', event: 'turn/end', command: 'a', outcome: 'exit-0' },
+    { ts: 2, kind: 'notify', event: 'tool/call', command: 'notify:webhook', outcome: 'sent' },
+  ]
+
+  it('serializes JSONL that round-trips, with a trailing newline', () => {
+    const text = historyToJsonl(records)
+    expect(text.endsWith('\n')).toBe(true)
+    const lines = text.trimEnd().split('\n')
+    expect(lines).toHaveLength(2)
+    expect(JSON.parse(lines[1] as string)).toEqual(records[1])
+  })
+
+  it('serializes nothing for an empty view', () => {
+    expect(historyToJsonl([])).toBe('')
+  })
+
+  it('stamps the download name with local time', () => {
+    expect(historyExportName(new Date(2026, 8, 11, 9, 5, 7))).toBe('dsh-hooks-history-20260911-090507.jsonl')
   })
 })

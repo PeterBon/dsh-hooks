@@ -113,7 +113,11 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 
 ## 命令执行
 
-- 每个命中的 hook 通过系统 shell 执行 `run`，**fire-and-forget**：失败只 `console.warn`、默认不重试（`retries` 可 opt-in 后台重试非零退出码）、绝不阻塞 agent 循环。命令的 stdout/stderr 会被捕获（各 64 KiB 上限），非零退出码时把 stderr 尾部写进告警日志。
+- 每个命中的 hook 通过系统 shell 执行 `run`，**fire-and-forget**：失败只 `console.warn`、默认不重试、绝不阻塞 agent 循环。命令的 stdout/stderr 会被捕获（各 64 KiB 上限），非零退出码时把 stderr 尾部写进告警日志。
+- **重试**（`retries` / `retryDelayMs`）对两个执行通道都生效，都是「首次尝试之后再重试 N 次」、间隔按 `retryDelayMs` 逐次翻倍（默认 500ms）：
+  - `run`：只重试**非零退出码**（spawn 失败与超时不重试）。
+  - `notify` 的 webhook 渠道：重试**传输失败**（连接被重置、超时）与 HTTP **408 / 429 / 5xx**；其余 4xx 表示请求本身有问题，不重试。**默认 `retries: 0` 表示只尝试一次**——0.13 之前 webhook 曾硬编码「传输失败自动再试一次」，现在这层兜底已并入 `retries`，需要它的老配置请显式写 `retries: 1`。
+  - `notify` 的 desktop 渠道是本地弹窗，不重试。
 - 上下文通过**环境变量**传递（数据不拼接进 shell 字符串，防注入）：
 
 | 变量 | 含义 |
@@ -282,6 +286,16 @@ config:
 
 每条记录：时间戳、kind（run/notify）、事件、命令、会话、结果（spawned / exit-0 / exit-nonzero / timeout / skipped / sent / send-failed…）、退出码、耗时、stderr 尾部。写盘失败静默吞掉，绝不阻塞 hook。
 
+终端里想边跑边看，用 `tail`（Ctrl+C 退出）：
+
+```sh
+dsh-hooks tail                                  # 回放最近 10 条，然后实时跟进
+dsh-hooks tail --event turn/end --outcome exit-nonzero   # 只看失败的回合结束
+dsh-hooks tail --hook notify-feishu --n 50 --json         # 50 条起，输出原始 JSONL 供 jq
+```
+
+`tail` 的 JSONL 路径取自 profile 配置的 `history.path`（未配置或配置读不出来时回落到默认路径，不会因为配置文件半途改动而报错）。它只读新增字节、容忍半行（等换行再输出）、文件被截断/轮转时自动从 0 重新跟进。
+
 ## dry-run：验证配置
 
 配置完先用 `dry-run` 模拟事件，看哪些 hook 会触发、哪些被过滤：
@@ -296,6 +310,19 @@ dsh-hooks dry-run turn/end --reason completed --profile web
 dsh-hooks dry-run tool/call --tool ssh_exec --execute   # 端到端真跑匹配的 hook
 ```
 
+**模拟数值字段**：数字类上下文（`runningSubagents`、`durationMs`、`toolDurationMs`、`usage*`…）可以直接给定值，用来验证基于数值的 `match`：
+
+```sh
+dsh-hooks dry-run turn/end --running-subagents 3
+dsh-hooks dry-run turn/end --duration-ms 1250 --usage-input 120000 --usage-output 45000
+dsh-hooks dry-run tool/result --tool-duration-ms 15000
+dsh-hooks dry-run usage/daily --field usageCacheReadTokens=90000   # 通用写法：--field <名>=<值>
+```
+
+可模拟字段白名单：`turn`、`step`、`durationMs`、`toolDurationMs`、`runningSubagents`、`totalSubagents`、`treeDurationMs`、`usageTurns`、`usageSessions`、`usageInputTokens`、`usageOutputTokens`、`usageCacheReadTokens`、`usageCacheWriteTokens`、`usageReasoningTokens`。非白名单字段或非法数字不会被静默丢弃——报告里会列出「已忽略无法模拟的字段」。
+
+模拟上下文与运行时保持一致：`turn/end` 一定带 `runningSubagents`（默认 0），所以 README 推荐的 `match: { runningSubagents: '^0$' }` 在 dry-run 里也能命中；`usage/daily` 带「昨天」与非零 token 明细。
+
 `dry-run` 直接读 profile 的 `cordis.patch.yml`（`id: dsh-hooks` 配置块），配置校验（非法正则等）会在这一步报错。
 
 ## Web GUI
@@ -303,11 +330,11 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # 端到端真跑匹配�
 安装后，dsh web 的设置面板里会出现「Hooks」分区（与「通用」「插件」平级）：
 
 - **状态徽章**：插件版本、hook 数、历史条数，以及运行诊断（正在执行的 hook 数、最近失败数）
-- **手动测试**：选事件（14 类）+ reason/tool，「模拟」看逐 hook 匹配报告，「执行」真实触发；切换输入自动清空旧结果
+- **手动测试**：选事件（18 类）+ reason/tool，并可用「模拟字段」一行填入 `runningSubagents` / `durationMs` / usage 输入输出等数值上下文；「模拟」看逐 hook 匹配报告，「执行」真实触发；切换输入自动清空旧结果
 - **通知渠道测试**：向 webhook（可选 Slack 摘要）/ desktop 渠道发一条测试通知，显示发送内容预览
 - **飞书通知**：网页内扫码连接飞书——显示二维码（含有效期倒计时、可取消），扫码后自动创建应用、写入凭据与 hook 配置；已连接后显示应用摘要，可一键发送测试卡片、调整卡片截断长度（50–5000 字符，默认 300，带正文预览）、重新扫码换绑或断开连接（可选一并移除飞书 hooks）
 - **当前 hooks**：只读清单（事件/when/match/run/notify + 超时重试参数），一键「复制 YAML」；点「编辑」进入表单编辑器，增删改 hook 后写回 `cordis.patch.yml`（自动备份原文件、写前校验正则与 run/notify 二选一，保存即热加载）
-- **执行历史时间线**：位于分区底部、**默认折叠**（展开状态记忆于 localStorage；标题旁「展开」查看最近 30 条触发：时间 / 事件 / 命令 / 结果 / stderr 尾部），5 秒自动刷新
+- **执行历史时间线**：位于分区底部、**默认折叠**（展开状态记忆于 localStorage），5 秒自动刷新。展开后可按**事件 / 结果 / 会话**过滤（条件同样记忆在 localStorage，附「显示 N / 共 M 条」计数与「清空过滤」），并把当前视图**导出为 JSONL**（与磁盘上的 `history.jsonl` 同格式，文件名带本地时间戳）——面板一次拉取最近 200 条，过滤在浏览器侧完成
 
 CLI/headless 环境完全不受影响：浏览器半只在 web 加载，核心零 UI 运行时依赖。
 
@@ -319,7 +346,7 @@ web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 `/ds
 | --- | --- | --- |
 | `/dsh-hooks/status` | GET | 插件版本、hook 数、历史条数、**当前 hooks 清单**与运行统计 |
 | `/dsh-hooks/history?n=50` | GET | 最近 N 条执行历史（JSON envelope） |
-| `/dsh-hooks/test` | POST | 模拟事件评估：`{"event":"tool/call","tool":"ssh_exec","execute":false}` 返回逐 hook 匹配报告；`execute: true` 真跑匹配的 hook |
+| `/dsh-hooks/test` | POST | 模拟事件评估：`{"event":"tool/call","tool":"ssh_exec","execute":false}` 返回逐 hook 匹配报告；可用 `fields` 覆盖数值上下文（`{"event":"turn/end","fields":{"runningSubagents":2}}`，非法字段返回 400）；`execute: true` 真跑匹配的 hook |
 | `/dsh-hooks/notify/test` | POST | 向指定渠道发测试通知：`{"channel":"webhook","url":…,"slack":true}` 或 `{"channel":"desktop"}`，返回发送内容预览 |
 | `/dsh-hooks/hooks/save` | POST | 保存 hook 列表：`{"profile":"web","hooks":[…]}`——校验（事件/when/正则/run-notify 二选一）后写回 cordis.patch.yml，自动备份原文件 |
 | `/dsh-hooks/feishu/status` | GET | 飞书连接摘要（app id / 目标均已打码，绝不返回 secret）+ 扫码会话快照 + 截断长度 + 正文预览 |
