@@ -57,6 +57,14 @@ describe('Config schema', () => {
     expect(HOOK_EVENTS).toContain('agent/error')
   })
 
+  it('declares and accepts every synthetic event', () => {
+    for (const event of ['tree/settled', 'hook/failed', 'usage/daily']) {
+      expect(HOOK_EVENTS).toContain(event)
+      const result = Config({ hooks: [{ on: event as never, run: 'x' }] })
+      expect(result.hooks?.[0]?.on).toBe(event)
+    }
+  })
+
   it('declares the firehose extension events', () => {
     for (const event of ['step/end', 'tool/call', 'tool/result', 'user/message', 'session/title', 'session/created', 'session/disposed']) {
       expect(HOOK_EVENTS).toContain(event)

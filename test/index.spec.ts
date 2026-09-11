@@ -797,3 +797,157 @@ describe('turn/start content (#83)', () => {
     expect(spawnMock).not.toHaveBeenCalled()
   })
 })
+
+describe('usage/daily wiring', () => {
+  /** A session whose log reports `usage` for the given turn. */
+  const usageSession = (id: string, turn: number, usage: Record<string, number>) => ({
+    id,
+    header: { cwd: 'C:/tmp' },
+    events: [
+      {
+        type: 'assistant/message',
+        seq: 1,
+        time: 1,
+        data: {
+          turn,
+          step: 1,
+          message: { id: 'a1', role: 'assistant', content: [{ type: 'text', text: 'x' }], source: { kind: 'model' } },
+          usage,
+        },
+      },
+    ],
+  })
+  const turnEnd = (turn: number) => ({ type: 'turn/end', data: { turn, reason: { kind: 'completed' } } })
+  const message = { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } } }
+
+  const spawnEnv = (call: number) => {
+    const [, options] = spawnMock.mock.calls[call] as [string, { env: Record<string, string | undefined> }]
+    return options.env ?? {}
+  }
+
+  function wire(config: Parameters<typeof apply>[1]) {
+    const { ctx, listeners } = fakeCtx({})
+    apply(ctx, config)
+    return {
+      emit: (session: unknown, event: unknown) => listeners.get('session/event')?.[0]?.(session, event),
+    }
+  }
+
+  // Local time, so the local-day key derivation is exercised for real.
+  const sep1 = new Date(2026, 8, 1, 23, 50)
+  const sep2 = new Date(2026, 8, 2, 0, 10)
+
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('accumulates per day and reports the finished day on the first event after midnight', () => {
+    vi.setSystemTime(sep1)
+    const main = usageSession('session-main', 1, { inputTokens: 100, outputTokens: 50 })
+    spawnMock.mockImplementation(() => fakeChild() as never)
+    const { emit } = wire({
+      hooks: [{ on: 'usage/daily', run: 'node report.mjs' }],
+      history: { enabled: false },
+    })
+
+    emit(main, turnEnd(1))
+    expect(spawnMock).not.toHaveBeenCalled()
+
+    vi.setSystemTime(sep2)
+    emit(main, message)
+
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+    const env = spawnEnv(0)
+    expect(env.DSH_HOOK_EVENT).toBe('usage/daily')
+    expect(env.DSH_HOOK_USAGE_DAY).toBe('2026-09-01')
+    expect(env.DSH_HOOK_USAGE_TURNS).toBe('1')
+    expect(env.DSH_HOOK_USAGE_SESSIONS).toBe('1')
+    expect(env.DSH_HOOK_USAGE_INPUT_TOKENS).toBe('100')
+    expect(env.DSH_HOOK_USAGE_OUTPUT_TOKENS).toBe('50')
+  })
+
+  it('reports once, then starts the new day with only the new day usage', () => {
+    vi.setSystemTime(sep1)
+    spawnMock.mockImplementation(() => fakeChild() as never)
+    const main = usageSession('session-main', 1, { inputTokens: 10, outputTokens: 5 })
+    const child = usageSession('session-sub', 1, { inputTokens: 7, outputTokens: 3 })
+    const { emit } = wire({
+      hooks: [{ on: 'usage/daily', run: 'node report.mjs' }],
+      history: { enabled: false },
+    })
+
+    emit(main, turnEnd(1))
+    emit(child, turnEnd(1)) // subagent turns are billed to the same account
+
+    vi.setSystemTime(sep2)
+    emit(main, message)
+    expect(spawnEnv(0)).toMatchObject({
+      DSH_HOOK_USAGE_TURNS: '2',
+      DSH_HOOK_USAGE_SESSIONS: '2',
+      DSH_HOOK_USAGE_INPUT_TOKENS: '17',
+      DSH_HOOK_USAGE_OUTPUT_TOKENS: '8',
+    })
+
+    // A second event on the same new day must not re-report the old day.
+    emit(main, message)
+    expect(spawnMock).toHaveBeenCalledTimes(1)
+
+    // The new day's turn is reported with the next rollover, on its own.
+    emit(main, turnEnd(1))
+    vi.setSystemTime(new Date(2026, 8, 3, 9, 0))
+    emit(main, message)
+    expect(spawnMock).toHaveBeenCalledTimes(2)
+    expect(spawnEnv(1)).toMatchObject({ DSH_HOOK_USAGE_DAY: '2026-09-02', DSH_HOOK_USAGE_INPUT_TOKENS: '10' })
+  })
+
+  it('never reports a day that saw no reported usage', () => {
+    vi.setSystemTime(sep1)
+    spawnMock.mockImplementation(() => fakeChild() as never)
+    const main = usageSession('session-main', 1, { inputTokens: 10, outputTokens: 5 })
+    const { emit } = wire({
+      hooks: [{ on: 'usage/daily', run: 'node report.mjs' }],
+      history: { enabled: false },
+    })
+
+    emit(main, message) // Sep 1: events, but no turn usage
+    vi.setSystemTime(sep2)
+    emit(main, message)
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+
+  it('does no daily bookkeeping without a usage/daily hook', () => {
+    vi.setSystemTime(sep1)
+    spawnMock.mockImplementation(() => fakeChild() as never)
+    const main = usageSession('session-main', 1, { inputTokens: 10, outputTokens: 5 })
+    const { emit } = wire({
+      hooks: [{ on: 'user/message', run: 'echo msg' }],
+      history: { enabled: false },
+    })
+
+    emit(main, turnEnd(1))
+    vi.setSystemTime(sep2)
+    emit(main, message)
+
+    expect(spawnMock.mock.calls.map(([, options]) => (options as { env?: Record<string, string> }).env?.DSH_HOOK_EVENT)).toEqual([
+      'user/message',
+    ])
+  })
+
+  it('treats a disabled usage/daily hook as absent', () => {
+    vi.setSystemTime(sep1)
+    spawnMock.mockImplementation(() => fakeChild() as never)
+    const main = usageSession('session-main', 1, { inputTokens: 10, outputTokens: 5 })
+    const { emit } = wire({
+      hooks: [{ on: 'usage/daily', run: 'node report.mjs', enabled: false }],
+      history: { enabled: false },
+    })
+
+    emit(main, turnEnd(1))
+    vi.setSystemTime(sep2)
+    emit(main, message)
+    expect(spawnMock).not.toHaveBeenCalled()
+  })
+})

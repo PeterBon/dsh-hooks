@@ -107,6 +107,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `agent/error` | Agent 循环报错 | 错误文本 |
 | `agent/status` | Agent 状态切换 | 状态 |
 | `hook/failed` | 同一 hook 连续失败达到 `failedAlertThreshold`（默认 3；合成事件，从结果流发射） | 失败 hook 摘要、连续失败次数 |
+| `usage/daily` | 本地日历日翻篇后的下一个事件（合成事件，无定时器）：报告刚结束那一天的 token 用量 | 覆盖日期、当日回合数、贡献会话数、当日 token 明细 |
 
 `turn/end` 的 `when` 匹配结束原因（`completed`、`error`…）；其他事件的 hook 无条件执行。
 
@@ -134,11 +135,11 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_STATUS` | Agent 状态（agent/status） |
 | `DSH_HOOK_ERROR` | 错误文本（agent/error，以及 turn/end 出错时的失败详情） |
 | `DSH_HOOK_CONTENT` | 事件内容快照：回合最后助手文本、工具结果文本、用户消息文本、回合触发消息文本（turn/start） |
-| `DSH_HOOK_USAGE_INPUT_TOKENS` | 本回合输入 token 总量（turn/end，逐 step 聚合） |
-| `DSH_HOOK_USAGE_OUTPUT_TOKENS` | 本回合输出 token 总量 |
-| `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | 本回合缓存读 token（有上报时） |
-| `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | 本回合缓存写 token（有上报时） |
-| `DSH_HOOK_USAGE_REASONING_TOKENS` | 本回合思考 token（有上报时） |
+| `DSH_HOOK_USAGE_INPUT_TOKENS` | 输入 token 总量（turn/end 为本回合、逐 step 聚合；usage/daily 为当日聚合） |
+| `DSH_HOOK_USAGE_OUTPUT_TOKENS` | 输出 token 总量（同上） |
+| `DSH_HOOK_USAGE_CACHE_READ_TOKENS` | 缓存读 token（有上报时，同上） |
+| `DSH_HOOK_USAGE_CACHE_WRITE_TOKENS` | 缓存写 token（有上报时，同上） |
+| `DSH_HOOK_USAGE_REASONING_TOKENS` | 思考 token（有上报时，同上） |
 | `DSH_HOOK_RUNNING_SUBAGENTS` | 本会话下仍在运行的存活子代理数（turn/end；`0` = 无——让 hook 能区分「工作已交给后台子代理」与「回合真正结束」） |
 | `DSH_HOOK_PARENT_SESSION_ID` | 父会话 id（子代理谱系；顶层会话无此变量） |
 | `DSH_HOOK_SUBAGENT` | 会话为子代理时为 `1`，否则 `0` |
@@ -151,6 +152,9 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_TREE_DURATION_MS` | 父回合结束 → 树落定的耗时（毫秒，`tree/settled`） |
 | `DSH_HOOK_FAILED_HOOK` | 连续失败的 hook 身份摘要（`hook/failed`） |
 | `DSH_HOOK_FAILURES` | 告警触发时的连续失败次数（`hook/failed`） |
+| `DSH_HOOK_USAGE_DAY` | 报告覆盖的本地日历日 `YYYY-MM-DD`（`usage/daily`） |
+| `DSH_HOOK_USAGE_TURNS` | 当日计入的回合数（`usage/daily`） |
+| `DSH_HOOK_USAGE_SESSIONS` | 当日贡献用量的会话数（`usage/daily`） |
 | `DSH_HOOK_TIMESTAMP` | ISO 时间戳 |
 
 - `run` 里的 `{{变量}}` 占位符会从同一上下文替换，例如 `run: 'echo {{DSH_HOOK_SESSION_ID}} >> log.txt'`。
@@ -184,6 +188,26 @@ config:
 ```
 
 已落定但闲置（idle）的 continuable 子代理不计入运行中，不会一直压住通知。落定监视是事件驱动且 best-effort 的：插件重启后监视集合丢失；重查失败会静默放弃该监视（不会补发迟到的通知）。
+
+### usage/daily：跨日 token 日报
+
+`turn/end` 只回答「这个回合花了多少」。要按天看成本，用合成事件 `usage/daily`：插件在内存里按**本地日历日**累计每个 `turn/end` 上报的 token（子代理会话的回合一并计入——同一个账号），日期翻篇后对下一个到达的事件发射一次日报，报告刚结束的那一天。检测纯事件驱动、无定时器、无定时任务。
+
+```yaml
+- on: 'usage/daily'
+  match: { usageInputTokens: '>0' }     # 可选：跳过没有用量的日子
+  run: 'node examples/log-usage.mjs'    # 或 notify: { channel: 'webhook', url: '…' }
+```
+
+`DSH_HOOK_USAGE_DAY` 是报告覆盖的日期（`YYYY-MM-DD`）；`DSH_HOOK_USAGE_TURNS` / `DSH_HOOK_USAGE_SESSIONS` 是当日计入的回合数与贡献会话数；token 明细沿用 `turn/end` 的 `DSH_HOOK_USAGE_*` 变量名（`usageInputTokens` / `usageOutputTokens` / `usageCacheReadTokens` / `usageCacheWriteTokens` / `usageReasoningTokens`），语义变为「该日聚合」。
+
+三条边界（按设计，不是 bug）：
+
+- **内存累计**：插件进程重启会丢掉进行中那一天的累计（重启后从新的一天、从零开始）；已发出的日报不受影响。
+- **事件驱动而非定时**：一天的用量要等下一个事件到达才报告，所以跨夜后若一直没动静，日报会推迟到下一次有事件时补发；那一天从未有回合上报用量则不发射（空日报是噪声）。
+- **零开销**：没有声明任何 `usage/daily` hook 时，插件完全不做累计与跨日检测。
+
+`dsh-hooks dry-run usage/daily` 用「昨天」和非零 token 模拟一次日报，可先验证 match 与命令。
 
 ### match 数值比较
 

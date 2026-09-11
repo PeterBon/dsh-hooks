@@ -229,3 +229,30 @@ describe('hook failed fields', () => {
     expect('DSH_HOOK_FAILURES' in env).toBe(false)
   })
 })
+
+describe('daily usage report fields', () => {
+  it('maps the covered day and its aggregates to environment variables', () => {
+    const env = toEnv({
+      event: 'usage/daily',
+      usageDay: '2026-09-01',
+      usageTurns: 12,
+      usageSessions: 3,
+      usageInputTokens: 120000,
+      usageOutputTokens: 45000,
+      timestamp: 'T',
+    })
+    expect(env.DSH_HOOK_USAGE_DAY).toBe('2026-09-01')
+    expect(env.DSH_HOOK_USAGE_TURNS).toBe('12')
+    expect(env.DSH_HOOK_USAGE_SESSIONS).toBe('3')
+    // The token variables are shared with turn/end: same names, day scope.
+    expect(env.DSH_HOOK_USAGE_INPUT_TOKENS).toBe('120000')
+    expect(env.DSH_HOOK_USAGE_OUTPUT_TOKENS).toBe('45000')
+  })
+
+  it('omits the daily-only variables on other events', () => {
+    const env = toEnv({ event: 'turn/end', usageInputTokens: 5, timestamp: 'T' })
+    expect('DSH_HOOK_USAGE_DAY' in env).toBe(false)
+    expect('DSH_HOOK_USAGE_TURNS' in env).toBe(false)
+    expect('DSH_HOOK_USAGE_SESSIONS' in env).toBe(false)
+  })
+})
