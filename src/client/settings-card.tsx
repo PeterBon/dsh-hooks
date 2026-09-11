@@ -13,7 +13,11 @@ import {
   fetchFeishuStatus,
   fetchHistory,
   fetchStatus,
+  filterHistory,
   formatTime,
+  HISTORY_OUTCOMES,
+  historyExportName,
+  historyToJsonl,
   outcomeLabel,
   outcomeTone,
   postFeishuCancel,
@@ -25,6 +29,7 @@ import {
   postNotifyTest,
   postTest,
   type FeishuStatusInfo,
+  type HistoryFilter,
   type HistoryRecord,
   type HookDescriptor,
   type HookWireSpec,
@@ -162,10 +167,30 @@ export function HooksSettingsCard(_props: object): ReactNode {
     }
   })
   const [loadError, setLoadError] = useState(false)
+  // History filters persist across reloads, like the panel's open state.
+  const [historyFilter, setHistoryFilterState] = useState<HistoryFilter>(() => ({
+    event: loadStored('dsh-hooks.historyEvent', ''),
+    outcome: loadStored('dsh-hooks.historyOutcome', ''),
+    session: loadStored('dsh-hooks.historySession', ''),
+  }))
+  const setHistoryFilter = (patch: Partial<HistoryFilter>) => {
+    setHistoryFilterState((current) => {
+      const next = { ...current, ...patch }
+      storeValue('dsh-hooks.historyEvent', next.event ?? '')
+      storeValue('dsh-hooks.historyOutcome', next.outcome ?? '')
+      storeValue('dsh-hooks.historySession', next.session ?? '')
+      return next
+    })
+  }
+  const visibleHistory = history === null ? null : filterHistory(history, historyFilter)
+  const historyFiltered =
+    (historyFilter.event ?? '') !== '' || (historyFilter.outcome ?? '') !== '' || (historyFilter.session ?? '') !== ''
   const [event, setEvent] = useState('turn/end')
   const [reason, setReason] = useState('completed')
   const [tool, setTool] = useState('')
   const [testResult, setTestResult] = useState<TestResult | null>(null)
+  // Optional numeric context overrides for the tester (empty = not simulated).
+  const [mockFields, setMockFields] = useState({ runningSubagents: '', durationMs: '', usageInputTokens: '', usageOutputTokens: '' })
 
   // Notify-channel quick test.
   const [notifyChannel, setNotifyChannel] = useState<'webhook' | 'desktop'>('webhook')
@@ -198,7 +223,9 @@ export function HooksSettingsCard(_props: object): ReactNode {
   const refresh = useCallback(async () => {
     const [statusInfo, records, feishuInfo] = await Promise.all([
       fetchStatus(),
-      fetchHistory(30),
+      // Pull a wider window than the timeline shows so the filters have
+      // something to work with without a second round trip.
+      fetchHistory(200),
       fetchFeishuStatus(),
     ])
     setStatus(statusInfo)
@@ -230,17 +257,48 @@ export function HooksSettingsCard(_props: object): ReactNode {
   // Clear the manual-test report whenever its inputs change.
   useEffect(() => {
     setTestResult(null)
-  }, [event, reason, tool])
+  }, [event, reason, tool, mockFields])
+
+  /** Numeric overrides the user actually filled in (empty inputs are skipped). */
+  const testFields = (): Record<string, number> | undefined => {
+    const fields: Record<string, number> = {}
+    for (const [key, raw] of Object.entries(mockFields)) {
+      const text = raw.trim()
+      if (text === '') continue
+      const value = Number(text)
+      if (Number.isFinite(value)) fields[key] = value
+    }
+    return Object.keys(fields).length > 0 ? fields : undefined
+  }
 
   const runTest = async (execute: boolean) => {
     const result = await postTest({
       event,
       reason: event === 'turn/end' && reason !== '' ? reason : undefined,
       tool: tool !== '' ? tool : undefined,
+      fields: testFields(),
       execute,
     })
     setTestResult(result)
     if (execute) void refresh()
+  }
+
+  /** Download the filtered timeline as JSONL (same shape as the on-disk log). */
+  const exportHistory = () => {
+    const records = visibleHistory ?? []
+    if (records.length === 0) return
+    const name = historyExportName()
+    const blob = new Blob([historyToJsonl(records)], { type: 'application/x-ndjson' })
+    const url = URL.createObjectURL(blob)
+    try {
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = name
+      anchor.click()
+    } finally {
+      // Release the object URL once the download has been handed off.
+      setTimeout(() => URL.revokeObjectURL(url), 0)
+    }
   }
 
   const sendNotifyTest = async () => {
@@ -511,6 +569,27 @@ export function HooksSettingsCard(_props: object): ReactNode {
                 placeholder="pwsh"
               />
             </label>
+          </div>
+          <div className="dh-test-row">
+            {(
+              [
+                ['runningSubagents', 'runningSubagents', '0'],
+                ['durationMs', 'durationMs', '1200'],
+                ['usageInputTokens', 'usage 输入', '120000'],
+                ['usageOutputTokens', 'usage 输出', '45000'],
+              ] as const
+            ).map(([key, label, placeholder]) => (
+              <label className="dh-field" key={key}>
+                <span className="dh-field-label">{label}（可选）</span>
+                <input
+                  className="dh-input"
+                  value={mockFields[key]}
+                  inputMode="numeric"
+                  onChange={(e) => setMockFields((current) => ({ ...current, [key]: e.target.value }))}
+                  placeholder={placeholder}
+                />
+              </label>
+            ))}
           </div>
           <div className="dh-buttons">
             <button type="button" className="dh-button" onClick={() => void runTest(false)}>
@@ -1006,12 +1085,81 @@ export function HooksSettingsCard(_props: object): ReactNode {
             {historyOpen ? '收起 ▲' : '展开 ▼'}
           </button>
         </div>
+        {historyOpen && (
+          <div className="dh-test-row dh-history-filters">
+            <label className="dh-field">
+              <span className="dh-field-label">事件</span>
+              <select
+                className="dh-select"
+                value={historyFilter.event ?? ''}
+                onChange={(e) => setHistoryFilter({ event: e.target.value })}
+              >
+                <option value="">全部</option>
+                {EVENTS.map((name) => (
+                  <option key={name} value={name}>
+                    {name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="dh-field">
+              <span className="dh-field-label">结果</span>
+              <select
+                className="dh-select"
+                value={historyFilter.outcome ?? ''}
+                onChange={(e) => setHistoryFilter({ outcome: e.target.value })}
+              >
+                <option value="">全部</option>
+                {HISTORY_OUTCOMES.map((name) => (
+                  <option key={name} value={name}>
+                    {outcomeLabel(name)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="dh-field">
+              <span className="dh-field-label">会话（可选）</span>
+              <input
+                className="dh-input"
+                value={historyFilter.session ?? ''}
+                onChange={(e) => setHistoryFilter({ session: e.target.value })}
+                placeholder="id 或名称片段"
+              />
+            </label>
+            <div className="dh-buttons">
+              <button
+                type="button"
+                className="dh-button"
+                disabled={!historyFiltered}
+                onClick={() => setHistoryFilter({ event: '', outcome: '', session: '' })}
+              >
+                清空过滤
+              </button>
+              <button
+                type="button"
+                className="dh-button"
+                disabled={(visibleHistory ?? []).length === 0}
+                onClick={exportHistory}
+              >
+                导出 JSONL
+              </button>
+            </div>
+          </div>
+        )}
+        {historyOpen && history !== null && history.length > 0 && (
+          <div className="dh-history-count">
+            显示 {visibleHistory?.length ?? 0} / 共 {history.length} 条（最近 200 条内）
+            {historyFiltered ? ' · 已过滤' : ''}
+          </div>
+        )}
         {historyOpen &&
           (history === null || history.length === 0 ? (
             <div className="dh-empty">{history === null ? '加载中…' : '暂无记录'}</div>
+          ) : (visibleHistory ?? []).length === 0 ? (
+            <div className="dh-empty">没有符合过滤条件的记录</div>
           ) : (
             <div className="dh-timeline">
-              {[...history].reverse().map((record, index) => (
+              {[...(visibleHistory ?? [])].reverse().map((record, index) => (
                 <div className="dh-record" key={`${record.ts}-${index}`}>
                   <div className="dh-record-main">
                     <div className="dh-record-top">
@@ -1024,6 +1172,9 @@ export function HooksSettingsCard(_props: object): ReactNode {
                     <div className="dh-record-command" title={record.command}>
                       {record.command}
                     </div>
+                    {record.sessionName !== undefined && record.sessionName !== '' && (
+                      <div className="dh-record-session">{record.sessionName}</div>
+                    )}
                     {record.error !== undefined && record.error !== '' && (
                       <div className="dh-record-error">{record.error.slice(0, 200)}</div>
                     )}

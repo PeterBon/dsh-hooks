@@ -118,14 +118,81 @@ describe('sendWebhook', () => {
     expect(result).toMatchObject({ ok: false })
   })
 
-  it('retries once on transport failure', async () => {
+  it('makes exactly one attempt by default (retries defaults to 0)', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('ECONNRESET'))
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {})
+    expect(result.ok).toBe(false)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('retries a transport failure up to the configured count', async () => {
     const fetchMock = vi.fn()
+      .mockRejectedValueOnce(new Error('ECONNRESET'))
       .mockRejectedValueOnce(new Error('ECONNRESET'))
       .mockResolvedValueOnce({ ok: true })
     vi.stubGlobal('fetch', fetchMock)
-    const result = await sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {})
+    const logs: string[] = []
+    const result = await sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {}, {
+      retries: 2,
+      retryDelayMs: 0,
+      log: (line) => logs.push(line),
+    })
     expect(result).toEqual({ ok: true })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(logs).toHaveLength(2)
+    expect(logs[0]).toContain('1/2')
+    expect(logs[1]).toContain('2/2')
+  })
+
+  it('retries retryable HTTP statuses (408 / 429 / 5xx)', async () => {
+    for (const status of [408, 429, 503]) {
+      const fetchMock = vi.fn().mockResolvedValueOnce({ ok: false, status }).mockResolvedValueOnce({ ok: true })
+      vi.stubGlobal('fetch', fetchMock)
+      const result = await sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {}, { retries: 1, retryDelayMs: 0, log: () => {} })
+      expect(result).toEqual({ ok: true })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    }
+  })
+
+  it('never retries a non-retryable status', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 404 })
+    vi.stubGlobal('fetch', fetchMock)
+    const result = await sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {}, { retries: 3, retryDelayMs: 0, log: () => {} })
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('HTTP 404')
+    expect(result.error).not.toContain('次尝试后仍失败')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('reports the attempt count once the retry budget is exhausted', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('down')))
+    const result = await sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {}, { retries: 1, retryDelayMs: 0, log: () => {} })
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('2 次尝试后仍失败')
+  })
+
+  it('waits retryDelayMs (doubling) before each retry', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchMock = vi.fn()
+        .mockRejectedValueOnce(new Error('a'))
+        .mockRejectedValueOnce(new Error('b'))
+        .mockResolvedValueOnce({ ok: true })
+      vi.stubGlobal('fetch', fetchMock)
+      const pending = sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {}, { retries: 2, retryDelayMs: 200, log: () => {} })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(399)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(await pending).toEqual({ ok: true })
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
 

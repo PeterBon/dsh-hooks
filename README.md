@@ -113,7 +113,11 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 
 ## Command execution
 
-- Each matching hook spawns `run` through the platform shell, **fire-and-forget**: failures only `console.warn`, never retried by default (`retries` opts into background retries of non-zero exits), never block the agent loop. Command stdout/stderr is captured (64 KiB per stream); on a non-zero exit the stderr tail is appended to the warning log.
+- Each matching hook spawns `run` through the platform shell, **fire-and-forget**: failures only `console.warn`, never retried by default, never block the agent loop. Command stdout/stderr is captured (64 KiB per stream); on a non-zero exit the stderr tail is appended to the warning log.
+- **Retries** (`retries` / `retryDelayMs`) apply to both execution channels with the same shape: up to `retries` extra attempts after the first one, with the delay doubling per attempt (`retryDelayMs`, default 500 ms):
+  - `run`: retries **non-zero exit codes** only (spawn failures and timeouts are never retried).
+  - `notify` webhook channel: retries **transport failures** (connection reset, timeout) and HTTP **408 / 429 / 5xx**; other 4xx mean the request itself is wrong and are not retried. The default `retries: 0` now means exactly one attempt — before 0.13 the webhook channel hard-coded a single transport retry, which is now folded into `retries`: existing configs that relied on it should set `retries: 1`.
+  - `notify` desktop channel is a local popup and never retries.
 - Context is passed via **environment variables** (no shell injection through data):
 
 | Variable | Meaning |
@@ -299,6 +303,16 @@ Every hook trigger is recorded into an in-memory ring buffer (default 500 entrie
 
 Each record: timestamp, kind (run/notify), event, command, session, outcome (spawned / exit-0 / exit-nonzero / timeout / skipped / sent / send-failed, …), exit code, duration, stderr tail. Disk failures are swallowed silently — history never blocks a hook.
 
+To follow the log while you work, use `tail` (Ctrl+C to quit):
+
+```sh
+dsh-hooks tail                                            # replay the last 10, then follow
+dsh-hooks tail --event turn/end --outcome exit-nonzero    # only failed turn ends
+dsh-hooks tail --hook notify-feishu --n 50 --json         # 50 backfill lines, raw JSONL for jq
+```
+
+`tail` resolves the JSONL path from the profile's `history.path`, falling back to the default without failing when the config file is missing or mid-edit. It reads only appended bytes, waits for complete lines (a record observed mid-write stays pending), and restarts from byte 0 when the file is truncated or rotated.
+
 ## dry-run: verify config
 
 Simulate an event to see which hooks would fire and why the others are filtered:
@@ -313,6 +327,17 @@ dsh-hooks dry-run turn/end --reason completed --profile web
 dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually run the matching hooks
 ```
 
+**Simulating numeric fields**: give count/timing/token fields a value to exercise numeric `match` filters:
+
+```sh
+dsh-hooks dry-run turn/end --running-subagents 3
+dsh-hooks dry-run turn/end --duration-ms 1250 --usage-input 120000 --usage-output 45000
+dsh-hooks dry-run tool/result --tool-duration-ms 15000
+dsh-hooks dry-run usage/daily --field usageCacheReadTokens=90000   # generic: --field <name>=<value>
+```
+
+Simulatable fields: `turn`, `step`, `durationMs`, `toolDurationMs`, `runningSubagents`, `totalSubagents`, `treeDurationMs`, `usageTurns`, `usageSessions`, `usageInputTokens`, `usageOutputTokens`, `usageCacheReadTokens`, `usageCacheWriteTokens`, `usageReasoningTokens`. Anything outside the list (or a non-finite number) is reported as "ignored" rather than dropped silently. The mock mirrors the runtime: `turn/end` always carries `runningSubagents` (0 by default), so the documented `match: { runningSubagents: '^0$' }` pattern is reachable in dry-run too; `usage/daily` carries "yesterday" plus non-zero token details.
+
 `dry-run` reads the profile's `cordis.patch.yml` (the `id: dsh-hooks` block) and validates the config (bad regexes fail here).
 
 ## Web GUI
@@ -320,11 +345,11 @@ dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually r
 After install, the dsh web settings panel gains a "Hooks" section (beside General and Plugins):
 
 - **Status badges**: plugin version, hook count, history count, plus live diagnostics (in-flight runs, recent failures)
-- **Manual tester**: pick an event (14 kinds) + reason/tool; "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks; the report clears when the inputs change
+- **Manual tester**: pick an event (18 kinds) + reason/tool, and fill the "simulated fields" row with numeric context (`runningSubagents`, `durationMs`, usage in/out); "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks; the report clears when the inputs change
 - **Notify-channel tests**: fire a test notification at the webhook (optional Slack summary) / desktop channel and show the payload preview
 - **Feishu connect**: scan-to-connect inside the panel — the QR code renders inline (with expiry countdown and a cancel button); after the scan the app is created, credentials + hook config are written, and the connected summary offers a one-click test card, an inline truncation-length editor (50–5000 chars, default 300, with a content preview), a re-connect flow, and a disconnect (optionally removing the Feishu hooks)
 - **Hook list / editor**: a read-only list of the current hooks (event/when/match/run/notify + timeout/retry fields) with one-click "copy YAML"; the "edit" mode turns it into a form editor whose changes are validated (regexes, run-notify exclusivity) and written back to `cordis.patch.yml` with an automatic backup
-- **Execution-history timeline**: at the bottom of the card, **collapsed by default** (the toggle state persists in localStorage; "expand" opens the latest 30 triggers: time / event / command / outcome / stderr tail), refreshed every 5s
+- **Execution-history timeline**: at the bottom of the card, **collapsed by default** (the toggle state persists in localStorage), refreshed every 5s. Expanded, it filters by **event / outcome / session** (filters persist in localStorage, with a "showing N of M" count and a clear button) and **exports the current view as JSONL** (same shape as the on-disk `history.jsonl`, file name stamped with local time); the panel fetches the latest 200 records and filters in the browser
 
 CLI/headless environments are unaffected: the browser half loads only in the web GUI and the core has no UI runtime dependencies.
 
@@ -336,7 +361,7 @@ In the web profile (when the shared webServer service exists) dsh-hooks register
 | --- | --- | --- |
 | `/dsh-hooks/status` | GET | plugin version, hook count, history count, the **current hook list**, and live runner stats |
 | `/dsh-hooks/history?n=50` | GET | the latest N execution records (JSON envelope) |
-| `/dsh-hooks/test` | POST | simulate an event: `{"event":"tool/call","tool":"ssh_exec","execute":false}` returns a per-hook match report; `execute: true` actually runs the matching hooks |
+| `/dsh-hooks/test` | POST | simulate an event: `{"event":"tool/call","tool":"ssh_exec","execute":false}` returns a per-hook match report; `fields` overrides numeric context (`{"event":"turn/end","fields":{"runningSubagents":2}}`, unknown fields → 400); `execute: true` actually runs the matching hooks |
 | `/dsh-hooks/notify/test` | POST | fire a test notification at a channel: `{"channel":"webhook","url":…,"slack":true}` or `{"channel":"desktop"}`; returns the payload preview |
 | `/dsh-hooks/hooks/save` | POST | save the hook list: `{"profile":"web","hooks":[…]}` — validates (events, reasons, regexes, run-notify exclusivity), writes back to cordis.patch.yml with an automatic backup |
 | `/dsh-hooks/feishu/status` | GET | Feishu connection summary (app id / target masked, secret never leaves the server) + the scan-session snapshot + the truncation length + a content preview |

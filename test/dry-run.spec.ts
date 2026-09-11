@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { describeHook, evaluateHooks, loadHooks, mockContext, runDryRun } from '../src/dry-run.js'
+import { describeHook, evaluateHooks, applyMockFields, loadHooks, MOCK_NUMERIC_FIELDS, mockContext, runDryRun } from '../src/dry-run.js'
 import type { HookSpec } from '../src/config.js'
 
 let tmp: string
@@ -26,6 +26,13 @@ function writePatch(hooks: unknown[]) {
           let yaml = `      - on: ${JSON.stringify(spec.on)}`
           if (spec.when) yaml += `\n        when: ${JSON.stringify(spec.when)}`
           if (spec.run) yaml += `\n        run: ${JSON.stringify(spec.run)}`
+          if (spec.match) {
+            // Flow style keeps the helper tiny; YAML accepts JSON here.
+            const entries = Object.entries(spec.match as Record<string, unknown>)
+              .map(([key, value]) => `\n          ${JSON.stringify(key)}: ${JSON.stringify(value)}`)
+              .join('')
+            yaml += `\n        match:${entries}`
+          }
           if (spec.notify) {
             yaml += `\n        notify:\n          channel: ${spec.notify.channel}`
             if (spec.notify.url) yaml += `\n          url: ${spec.notify.url}`
@@ -156,5 +163,90 @@ describe('runDryRun', () => {
     expect(text).toContain('✅ [1]')
     expect(text).toContain('⏭ [2]')
     expect(text).toContain('--execute')
+  })
+
+  it('simulates numeric fields so count-based matches become reachable', async () => {
+    const file = writePatch([
+      { on: 'turn/end', match: { runningSubagents: '^0$' }, run: 'echo idle' },
+      { on: 'turn/end', match: { runningSubagents: { gt: 0 } }, run: 'echo busy' },
+    ])
+    const idleLines: string[] = []
+    const idle = await runDryRun({
+      profile: 'web',
+      event: 'turn/end',
+      paths: { patchFile: file },
+      print: (l) => idleLines.push(l),
+    })
+    // The turn/end mock carries the count the runtime always provides (0),
+    // so the documented `runningSubagents: '^0$'` pattern is reachable again.
+    expect(idle.matched).toBe(1)
+    expect(idleLines.join('\n')).toContain('✅ [1]')
+
+    const busyLines: string[] = []
+    const busy = await runDryRun({
+      profile: 'web',
+      event: 'turn/end',
+      fields: { runningSubagents: 3 },
+      paths: { patchFile: file },
+      print: (l) => busyLines.push(l),
+    })
+    expect(busy.matched).toBe(1)
+    expect(busyLines.join('\n')).toContain('模拟字段：runningSubagents=3')
+    expect(busyLines.join('\n')).toContain('✅ [2]')
+  })
+
+  it('names fields it cannot simulate instead of dropping them silently', async () => {
+    const file = writePatch([{ on: 'turn/end', run: 'echo hi' }])
+    const lines: string[] = []
+    await runDryRun({
+      profile: 'web',
+      event: 'turn/end',
+      fields: { nope: 1, durationMs: 'soon', turn: 7 },
+      paths: { patchFile: file },
+      print: (l) => lines.push(l),
+    })
+    const text = lines.join('\n')
+    expect(text).toContain('已忽略无法模拟的字段：nope, durationMs')
+    expect(text).toContain('模拟字段：turn=7')
+  })
+})
+
+describe('applyMockFields', () => {
+  it('applies finite numbers for whitelisted fields only', () => {
+    const { ctx, ignored } = applyMockFields(mockContext('turn/end'), { turn: 4, durationMs: 900, nope: 1 })
+    expect(ctx.turn).toBe(4)
+    expect(ctx.durationMs).toBe(900)
+    expect(ignored).toEqual(['nope'])
+  })
+
+  it('rejects non-finite and non-numeric values', () => {
+    const { ctx, ignored } = applyMockFields(mockContext('tool/result'), {
+      durationMs: Number.NaN,
+      runningSubagents: '2',
+      usageInputTokens: Number.POSITIVE_INFINITY,
+    })
+    expect(ignored).toEqual(['durationMs', 'runningSubagents', 'usageInputTokens'])
+    expect(ctx.durationMs).toBeUndefined()
+    expect(ctx.usageInputTokens).toBeUndefined()
+  })
+
+  it('returns the context untouched without fields, and never mutates the input', () => {
+    const base = mockContext('turn/end')
+    expect(applyMockFields(base, undefined)).toEqual({ ctx: base, ignored: [] })
+    applyMockFields(base, { turn: 9 })
+    expect(base.turn).toBe(1)
+  })
+})
+
+describe('mockContext field presence', () => {
+  it('carries the always-present turn/end fields', () => {
+    expect(mockContext('turn/end').runningSubagents).toBe(0)
+    expect(mockContext('step/end').runningSubagents).toBeUndefined()
+  })
+
+  it('exposes a documented whitelist of simulatable fields', () => {
+    for (const field of ['runningSubagents', 'durationMs', 'usageInputTokens', 'usageOutputTokens']) {
+      expect(MOCK_NUMERIC_FIELDS).toContain(field)
+    }
   })
 })

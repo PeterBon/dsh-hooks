@@ -10,6 +10,7 @@ import YAML from 'yaml'
 import { Config, type HookSpec, type TurnEndReasonKind } from './config.js'
 import { matchFilters } from './events.js'
 import type { HookContext } from './context.js'
+import { DEFAULT_HISTORY_PATH } from './history.js'
 import { localDayKey } from './usage.js'
 import { createHookRunner } from './runner.js'
 import { fireNotify } from './notify.js'
@@ -20,12 +21,10 @@ export function patchFilePath(profile: string): string {
 }
 
 /**
- * Load and normalize the dsh-hooks config block from a profile's
- * cordis.patch.yml. Runs the block through the Config schema so match
- * regexes compile and invalid entries fail loudly.
+ * Raw `dsh-hooks` config block from a profile's cordis.patch.yml. Throws on a
+ * missing/unreadable file — callers that must stay lenient catch it.
  */
-export function loadHooks(profile: string, paths: { patchFile?: string } = {}): { hooks: HookSpec[]; source: string } {
-  const file = paths.patchFile ?? patchFilePath(profile)
+function readConfigBlock(file: string): { config?: unknown } {
   if (!existsSync(file)) throw new Error(`未找到 ${file}（profile 不存在或没有 cordis.patch.yml）`)
   let entries: unknown
   try {
@@ -34,17 +33,92 @@ export function loadHooks(profile: string, paths: { patchFile?: string } = {}): 
     throw new Error(`cordis.patch.yml 解析失败：${file}`)
   }
   if (!Array.isArray(entries)) throw new Error('cordis.patch.yml 顶层必须是 YAML 数组')
-  let block: { config?: unknown } | undefined
   for (const entry of entries) {
     if (entry !== null && typeof entry === 'object' && (entry as { id?: unknown }).id === 'dsh-hooks') {
-      block = entry as { config?: unknown }
-      break
+      return entry as { config?: unknown }
     }
   }
-  if (block === undefined) throw new Error('cordis.patch.yml 中没有 id: dsh-hooks 的配置块')
+  throw new Error('cordis.patch.yml 中没有 id: dsh-hooks 的配置块')
+}
+
+/**
+ * Load and normalize the dsh-hooks config block from a profile's
+ * cordis.patch.yml. Runs the block through the Config schema so match
+ * regexes compile and invalid entries fail loudly.
+ */
+export function loadHooks(profile: string, paths: { patchFile?: string } = {}): { hooks: HookSpec[]; source: string } {
+  const file = paths.patchFile ?? patchFilePath(profile)
+  const block = readConfigBlock(file)
   const rawHooks = (block.config as { hooks?: unknown } | undefined)?.hooks
   const config = Config({ hooks: (Array.isArray(rawHooks) ? rawHooks : []) as HookSpec[] })
   return { hooks: config.hooks ?? [], source: file }
+}
+
+/**
+ * Resolve the JSONL path a profile's dsh-hooks config writes history to
+ * (`config.history.path`, else the plugin default). Deliberately lenient:
+ * `tail` must keep working while the config file is missing or mid-edit.
+ */
+export function loadHistoryPath(profile: string, paths: { patchFile?: string } = {}): string {
+  const file = paths.patchFile ?? patchFilePath(profile)
+  try {
+    const block = readConfigBlock(file)
+    const configured = (block.config as { history?: { path?: unknown } } | undefined)?.history?.path
+    if (typeof configured === 'string' && configured.trim() !== '') return configured
+  } catch {
+    // Missing/broken config: fall through to the plugin default.
+  }
+  return DEFAULT_HISTORY_PATH
+}
+
+/**
+ * Numeric context fields a simulated event may override — the ones a `match`
+ * comparison can meaningfully target. Strings keep their dedicated CLI flag /
+ * tester input (`--tool`, `--session-name`, …) and the mock defaults.
+ */
+export const MOCK_NUMERIC_FIELDS = [
+  'turn',
+  'step',
+  'durationMs',
+  'toolDurationMs',
+  'runningSubagents',
+  'totalSubagents',
+  'treeDurationMs',
+  'usageTurns',
+  'usageSessions',
+  'usageInputTokens',
+  'usageOutputTokens',
+  'usageCacheReadTokens',
+  'usageCacheWriteTokens',
+  'usageReasoningTokens',
+] as const
+
+export type MockNumericField = (typeof MOCK_NUMERIC_FIELDS)[number]
+
+export interface MockFieldsResult {
+  ctx: HookContext
+  /** Keys that were dropped: unknown field names or non-finite numbers. */
+  ignored: string[]
+}
+
+/**
+ * Apply explicit numeric overrides to a simulated context. Values must be
+ * finite numbers; anything else (unknown field, string, NaN) is reported in
+ * `ignored` instead of being silently coerced — a tester must never "pass"
+ * because a filter was fed the wrong type.
+ */
+export function applyMockFields(ctx: HookContext, fields: Record<string, unknown> | undefined): MockFieldsResult {
+  if (fields === undefined) return { ctx, ignored: [] }
+  const next: HookContext = { ...ctx }
+  const ignored: string[] = []
+  for (const [key, value] of Object.entries(fields)) {
+    if (!(MOCK_NUMERIC_FIELDS as readonly string[]).includes(key) || typeof value !== 'number' || !Number.isFinite(value)) {
+      ignored.push(key)
+      continue
+    }
+    ;(next as unknown as Record<string, number>)[key] = value
+  }
+  return { ctx: next, ignored }
 }
 
 /** A synthetic context for the simulated event, overridable per field. */
@@ -60,6 +134,12 @@ export function mockContext(event: string, overrides: Partial<HookContext> = {})
     callId: 'dry-run-call',
     content: 'dry-run 模拟内容',
     timestamp: new Date().toISOString(),
+  }
+  if (event === 'turn/end') {
+    // The real turn/end context ALWAYS carries the live subagent count (0 when
+    // none are running), so the mock must too — otherwise the documented
+    // `match: { runningSubagents: '^0$' }` pattern could never match here.
+    ctx.runningSubagents = 0
   }
   if (event === 'usage/daily') {
     // A daily report always describes a day that already ended, and the
@@ -142,6 +222,8 @@ export interface DryRunOptions {
   reason?: TurnEndReasonKind
   tool?: string
   sessionName?: string
+  /** Explicit numeric context overrides (see {@link MOCK_NUMERIC_FIELDS}). */
+  fields?: Record<string, unknown>
   /** Actually run the matching hooks (real side effects!). */
   execute?: boolean
   print?: (line: string) => void
@@ -154,15 +236,26 @@ export async function runDryRun(options: DryRunOptions): Promise<{ matched: numb
   const print = options.print ?? console.log
   const { hooks, source } = loadHooks(profile, options.paths)
   const reasonKind = options.reason
-  const ctx = mockContext(options.event, {
-    reason: reasonKind,
-    tool: options.tool,
-    sessionName: options.sessionName,
-  })
+  const simulated = applyMockFields(
+    mockContext(options.event, {
+      reason: reasonKind,
+      tool: options.tool,
+      sessionName: options.sessionName,
+    }),
+    options.fields,
+  )
+  const ctx = simulated.ctx
 
   print('dsh-hooks dry-run')
   print(`配置来源：${source}（${hooks.length} 个 hook）`)
   print(`模拟事件：${options.event}${reasonKind ? `（reason=${reasonKind}）` : ''}`)
+  if (options.fields !== undefined && Object.keys(options.fields).length > 0) {
+    const applied = Object.keys(options.fields).filter((key) => !simulated.ignored.includes(key))
+    if (applied.length > 0) print(`模拟字段：${applied.map((key) => `${key}=${String(options.fields?.[key])}`).join(', ')}`)
+  }
+  if (simulated.ignored.length > 0) {
+    print(`⚠ 已忽略无法模拟的字段：${simulated.ignored.join(', ')}（可用：${MOCK_NUMERIC_FIELDS.join(' / ')}）`)
+  }
   const lines = evaluateHooks(hooks, options.event, ctx, reasonKind)
   for (const line of lines) {
     print(line.matched ? `✅ [${line.index}] ${line.summary}` : `⏭ [${line.index}] ${line.summary} —— ${line.why}`)
@@ -182,7 +275,7 @@ export async function runDryRun(options: DryRunOptions): Promise<{ matched: numb
         if (!outcome.ok) print(`  ✗ ${outcome.reason}${outcome.detail ? `: ${outcome.detail}` : ''}`)
       } else if (hook.notify) {
         print(`▶ 发送 [${line.index}] notify:${hook.notify.channel}`)
-        await fireNotify(hook.notify, ctx)
+        await fireNotify(hook.notify, ctx, undefined, { retries: hook.retries, retryDelayMs: hook.retryDelayMs })
       }
     }
     print('（run 命令 fire-and-forget：执行结果见 dsh 日志）')

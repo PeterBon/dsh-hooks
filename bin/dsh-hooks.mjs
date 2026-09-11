@@ -25,7 +25,8 @@
  */
 import { spawn } from 'node:child_process'
 import QRCode from 'qrcode'
-import { runDryRun } from '../lib/dry-run.js'
+import { loadHistoryPath, runDryRun } from '../lib/dry-run.js'
+import { formatTailRecord, HistoryTailer, matchesTailFilter } from '../lib/tail.js'
 import {
   FEISHU_CONFIG_PATH,
   mergePatchYaml,
@@ -120,16 +121,97 @@ function cliArgs(args) {
 
 /** Parse the dry-run flags; the first positional arg is the event. */
 function cliDryRunArgs(args) {
-  const opts = { event: '', execute: false }
+  const opts = { event: '', execute: false, fields: {} }
+  /** Numeric context fields the CLI exposes by name (plus the generic --field). */
+  const fieldFlags = {
+    '--running-subagents': 'runningSubagents',
+    '--duration-ms': 'durationMs',
+    '--tool-duration-ms': 'toolDurationMs',
+    '--usage-input': 'usageInputTokens',
+    '--usage-output': 'usageOutputTokens',
+  }
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--reason') opts.reason = args[++i]
-    else if (args[i] === '--tool') opts.tool = args[++i]
-    else if (args[i] === '--session-name') opts.sessionName = args[++i]
-    else if (args[i] === '--profile') opts.profile = args[++i]
-    else if (args[i] === '--execute') opts.execute = true
-    else if (!args[i].startsWith('-') && opts.event === '') opts.event = args[i]
+    const flag = args[i]
+    if (flag === '--reason') opts.reason = args[++i]
+    else if (flag === '--tool') opts.tool = args[++i]
+    else if (flag === '--session-name') opts.sessionName = args[++i]
+    else if (flag === '--profile') opts.profile = args[++i]
+    else if (flag === '--execute') opts.execute = true
+    else if (fieldFlags[flag] !== undefined) opts.fields[fieldFlags[flag]] = cliNumber(args[++i])
+    else if (flag === '--field') {
+      // Generic escape hatch: --field usageCacheReadTokens=90000
+      const [name, raw] = String(args[++i] ?? '').split('=')
+      if (name) opts.fields[name] = cliNumber(raw)
+    } else if (!flag.startsWith('-') && opts.event === '') opts.event = flag
   }
   return opts
+}
+
+/**
+ * CLI numbers stay numbers when they parse (the mock only accepts finite
+ * numbers); anything else is passed through so the dry-run report can name
+ * the field as ignored instead of silently dropping it.
+ */
+function cliNumber(raw) {
+  const value = Number(raw)
+  return raw !== undefined && raw !== '' && Number.isFinite(value) ? value : raw
+}
+
+/** Parse the tail flags. */
+function cliTailArgs(args) {
+  const opts = { json: false }
+  for (let i = 0; i < args.length; i++) {
+    const flag = args[i]
+    if (flag === '--profile') opts.profile = args[++i]
+    else if (flag === '--n') opts.n = cliNumber(args[++i])
+    else if (flag === '--event') opts.event = args[++i]
+    else if (flag === '--outcome') opts.outcome = args[++i]
+    else if (flag === '--hook') opts.hook = args[++i]
+    else if (flag === '--interval') opts.intervalMs = cliNumber(args[++i])
+    else if (flag === '--file') opts.file = args[++i]
+    else if (flag === '--json') opts.json = true
+  }
+  return opts
+}
+
+/**
+ * Follow the history JSONL: print the last `n` records, then everything
+ * appended afterwards. Returns a stop function (the CLI wires it to SIGINT,
+ * tests call it directly).
+ */
+export async function tailHistory(options = {}) {
+  const print = options.print ?? console.log
+  const intervalMs = typeof options.intervalMs === 'number' && options.intervalMs > 0 ? options.intervalMs : 500
+  const file = options.file ?? loadHistoryPath(options.profile ?? 'web')
+  const filter = { event: options.event, outcome: options.outcome, hook: options.hook }
+  const active = Object.entries(filter).filter(([, value]) => value !== undefined)
+  const tailer = new HistoryTailer(file)
+
+  const emit = (records) => {
+    for (const record of records) {
+      if (!matchesTailFilter(record, filter)) continue
+      print(options.json ? JSON.stringify(record) : formatTailRecord(record))
+    }
+  }
+
+  print(`dsh-hooks tail · ${file}`)
+  if (active.length > 0) print(`过滤：${active.map(([key, value]) => `${key}=${value}`).join(' ')}`)
+  const backfill = tailer.backfill(typeof options.n === 'number' ? options.n : 10)
+  if (backfill.length === 0) print('（暂无历史记录）')
+  emit(backfill)
+  print('—— 实时跟进中（Ctrl+C 退出）——')
+
+  const timer = setInterval(() => {
+    try {
+      const batch = tailer.readNew()
+      if (batch.reset) print(`⚠ 文件被截断或轮转，已从头跟进：${file}`)
+      emit(batch.records)
+    } catch (error) {
+      print(`⚠ 读取失败：${error instanceof Error ? error.message : String(error)}`)
+    }
+  }, intervalMs)
+
+  return () => clearInterval(timer)
 }
 
 function isDirectRun() {
@@ -159,11 +241,24 @@ function runCli() {
   } else if (command === 'dry-run') {
     const opts = cliDryRunArgs(args)
     if (!opts.event) {
-      console.error('缺少事件参数，用法：dsh-hooks dry-run <event> [--reason <kind>] [--profile <name>] [--execute]')
+      console.error('缺少事件参数，用法：dsh-hooks dry-run <event> [--reason <kind>] [--profile <name>] [--execute] [--running-subagents N]')
       process.exit(1)
     }
     runDryRun(opts)
       .then(() => process.exit(0))
+      .catch((error) => {
+        console.error(`✗ ${error instanceof Error ? error.message : String(error)}`)
+        process.exit(1)
+      })
+  } else if (command === 'tail') {
+    const opts = cliTailArgs(args)
+    tailHistory(opts)
+      .then((stop) => {
+        process.on('SIGINT', () => {
+          stop()
+          process.exit(0)
+        })
+      })
       .catch((error) => {
         console.error(`✗ ${error instanceof Error ? error.message : String(error)}`)
         process.exit(1)
@@ -173,7 +268,12 @@ function runCli() {
   dsh-hooks feishu-setup [--profile <name>]   扫码创建飞书通知机器人并自动配置
   dsh-hooks feishu-test                       验证配置并发送测试卡片
   dsh-hooks dry-run <event> [--reason <kind>] [--tool <name>] [--profile <name>] [--execute]
-                                              模拟事件，列出会触发/被过滤的 hook（--execute 实际执行）`)
+                                               [--running-subagents N] [--duration-ms N] [--tool-duration-ms N]
+                                               [--usage-input N] [--usage-output N] [--field <名>=<值>]
+                                              模拟事件，列出会触发/被过滤的 hook（--execute 实际执行）
+  dsh-hooks tail [--profile <name>] [--n <count>] [--event <name>] [--outcome <name>] [--hook <text>]
+                                               [--json] [--interval <ms>] [--file <path>]
+                                               实时跟踪执行历史（history.jsonl），Ctrl+C 退出`)
     process.exit(command === '--help' || command === 'help' || command === undefined ? 0 : 1)
   }
 }

@@ -79,6 +79,9 @@ export interface TestLine {
 
 export interface TestResult {
   event: string
+  reason?: string
+  /** Numeric context fields the server actually simulated. */
+  fields?: Record<string, number>
   executed: boolean
   total: number
   matched: number
@@ -119,10 +122,71 @@ export async function fetchHistory(n = 50, fetchFn: typeof fetch = fetch): Promi
   return getJson<HistoryRecord[]>(`/dsh-hooks/history?n=${capped}`, fetchFn)
 }
 
+/** Outcomes a hook run can end in (kept in sync with the host record type). */
+export const HISTORY_OUTCOMES = [
+  'spawned',
+  'exit-0',
+  'exit-nonzero',
+  'timeout',
+  'spawn-failed',
+  'skipped',
+  'sent',
+  'send-failed',
+] as const
+
+/** Active history filters; an unset field means "no filter". */
+export interface HistoryFilter {
+  /** Exact event name (`turn/end`, …). */
+  event?: string
+  /** Exact outcome (`exit-0`, `send-failed`, …). */
+  outcome?: string
+  /** Case-insensitive substring of the session id or readable name. */
+  session?: string
+}
+
+/**
+ * Apply the panel's filters to a batch of records. The three conditions are
+ * AND-ed; an empty filter keeps everything (the timeline's default view).
+ */
+export function filterHistory(records: readonly HistoryRecord[], filter: HistoryFilter): HistoryRecord[] {
+  const session = filter.session?.trim().toLowerCase()
+  return records.filter((record) => {
+    if (filter.event !== undefined && filter.event !== '' && record.event !== filter.event) return false
+    if (filter.outcome !== undefined && filter.outcome !== '' && record.outcome !== filter.outcome) return false
+    if (session !== undefined && session !== '') {
+      const id = record.sessionId?.toLowerCase() ?? ''
+      const name = record.sessionName?.toLowerCase() ?? ''
+      if (!id.includes(session) && !name.includes(session)) return false
+    }
+    return true
+  })
+}
+
+/** Serialize records as JSONL — byte-compatible with the on-disk history log. */
+export function historyToJsonl(records: readonly HistoryRecord[]): string {
+  if (records.length === 0) return ''
+  return `${records.map((record) => JSON.stringify(record)).join('\n')}\n`
+}
+
+/** Download file name for a history export, stamped with local time. */
+export function historyExportName(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp =
+    `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}` +
+    `-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
+  return `dsh-hooks-history-${stamp}.jsonl`
+}
+
 export interface TestRequest {
   event: string
   reason?: string
   tool?: string
+  /**
+   * Numeric context overrides (runningSubagents, durationMs, usage*, …).
+   * The server rejects unknown names or non-finite values with a 400, which
+   * surfaces here as `null` plus a console warning.
+   */
+  fields?: Record<string, number>
   execute?: boolean
 }
 

@@ -13,6 +13,33 @@ export declare function loadHooks(profile: string, paths?: {
     hooks: HookSpec[];
     source: string;
 };
+/**
+ * Resolve the JSONL path a profile's dsh-hooks config writes history to
+ * (`config.history.path`, else the plugin default). Deliberately lenient:
+ * `tail` must keep working while the config file is missing or mid-edit.
+ */
+export declare function loadHistoryPath(profile: string, paths?: {
+    patchFile?: string;
+}): string;
+/**
+ * Numeric context fields a simulated event may override — the ones a `match`
+ * comparison can meaningfully target. Strings keep their dedicated CLI flag /
+ * tester input (`--tool`, `--session-name`, …) and the mock defaults.
+ */
+export declare const MOCK_NUMERIC_FIELDS: readonly ['turn', 'step', 'durationMs', 'toolDurationMs', 'runningSubagents', 'totalSubagents', 'treeDurationMs', 'usageTurns', 'usageSessions', 'usageInputTokens', 'usageOutputTokens', 'usageCacheReadTokens', 'usageCacheWriteTokens', 'usageReasoningTokens'];
+export type MockNumericField = (typeof MOCK_NUMERIC_FIELDS)[number];
+export interface MockFieldsResult {
+    ctx: HookContext;
+    /** Keys that were dropped: unknown field names or non-finite numbers. */
+    ignored: string[];
+}
+/**
+ * Apply explicit numeric overrides to a simulated context. Values must be
+ * finite numbers; anything else (unknown field, string, NaN) is reported in
+ * `ignored` instead of being silently coerced — a tester must never "pass"
+ * because a filter was fed the wrong type.
+ */
+export declare function applyMockFields(ctx: HookContext, fields: Record<string, unknown> | undefined): MockFieldsResult;
 /** A synthetic context for the simulated event, overridable per field. */
 export declare function mockContext(event: string, overrides?: Partial<HookContext>): HookContext;
 export interface DryRunLine {
@@ -34,6 +61,8 @@ export interface DryRunOptions {
     reason?: TurnEndReasonKind;
     tool?: string;
     sessionName?: string;
+    /** Explicit numeric context overrides (see {@link MOCK_NUMERIC_FIELDS}). */
+    fields?: Record<string, unknown>;
     /** Actually run the matching hooks (real side effects!). */
     execute?: boolean;
     print?: (line: string) => void;

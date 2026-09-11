@@ -13,7 +13,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import type { HookSpec } from './config.js'
 import type { HistorySink } from './history.js'
-import { describeHook, evaluateHooks, mockContext, patchFilePath } from './dry-run.js'
+import { applyMockFields, describeHook, evaluateHooks, MOCK_NUMERIC_FIELDS, mockContext, patchFilePath } from './dry-run.js'
 import { createHookRunner, type HookRunner } from './runner.js'
 import { fireNotify, summarizeContext } from './notify.js'
 import type { HookContext } from './context.js'
@@ -212,11 +212,39 @@ export function createHookHandler(options: HookRoutesOptions) {
         return
       }
       const reason = typeof body.reason === 'string' && body.reason !== '' ? body.reason : undefined
-      const ctx = mockContext(event, {
-        reason,
-        tool: typeof body.tool === 'string' ? body.tool : undefined,
-        sessionName: typeof body.sessionName === 'string' ? body.sessionName : undefined,
-      })
+      const rawFields = body.fields
+      if (rawFields !== undefined && (typeof rawFields !== 'object' || rawFields === null || Array.isArray(rawFields))) {
+        json(res, FAIL('bad-request', 'fields 必须是对象（模拟字段 → 数字）'), 400)
+        return
+      }
+      const simulated = applyMockFields(
+        mockContext(event, {
+          reason,
+          tool: typeof body.tool === 'string' ? body.tool : undefined,
+          sessionName: typeof body.sessionName === 'string' ? body.sessionName : undefined,
+        }),
+        rawFields as Record<string, unknown> | undefined,
+      )
+      if (simulated.ignored.length > 0) {
+        json(
+          res,
+          FAIL(
+            'bad-request',
+            `无法模拟的字段：${simulated.ignored.join(', ')}（可用：${MOCK_NUMERIC_FIELDS.join(' / ')}）`,
+          ),
+          400,
+        )
+        return
+      }
+      const ctx = simulated.ctx
+      // Echo every numeric field the simulated context actually carries (mock
+      // defaults + explicit overrides) so the panel can show what was matched.
+      const fields = Object.fromEntries(
+        MOCK_NUMERIC_FIELDS.filter((key) => (ctx as unknown as Record<string, unknown>)[key] !== undefined).map((key) => [
+          key,
+          (ctx as unknown as Record<string, unknown>)[key],
+        ]),
+      )
       const lines = evaluateHooks(hooks, event, ctx, reason as never)
       const matchedHooks = lines.filter((line) => line.matched)
 
@@ -226,7 +254,7 @@ export function createHookHandler(options: HookRoutesOptions) {
         for (const line of matchedHooks) {
           const hook = hooks[line.index - 1]
           if (hook.run) runner.run(hook, ctx)
-          else if (hook.notify) void fireNotify(hook.notify, ctx)
+          else if (hook.notify) void fireNotify(hook.notify, ctx, undefined, { retries: hook.retries, retryDelayMs: hook.retryDelayMs })
         }
       }
 
@@ -235,6 +263,7 @@ export function createHookHandler(options: HookRoutesOptions) {
         OK({
           event,
           reason,
+          fields,
           executed: execute,
           total: hooks.length,
           matched: matchedHooks.length,
