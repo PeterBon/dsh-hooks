@@ -89,7 +89,7 @@
     "vitest": "^5.0.0"
   },
   "dependencies": {
-    "@larksuiteoapi/node-sdk": "^1.73.3",
+    "@larksuiteoapi/node-sdk": "^1.74.0",
     "qrcode": "^1.5.4",
     "yaml": "^2.9.0"
   }
