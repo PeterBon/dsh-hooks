@@ -70,6 +70,20 @@ npm 包页 → Settings → Trusted Publishing → Add：
    必须写在 `pnpm-workspace.yaml` 的 `overrides:`。
 6. **发布步骤必须幂等**：`gh release create` 对已存在的 Release 直接失败，
    `npm publish` 对已存在的版本直接失败——两者都先探测再执行。
+7. **连续合并多个 Dependabot 锁文件 PR 会产生「重复映射键」**（已复发两次：
+   #104+#105 → #107 修；#111+#109 → 本次修）。每个分支各自基于旧 base
+   重生成锁文件，GitHub 的文本合并会把同一个包条目插进 `packages:` /
+   `snapshots:` 两次，pnpm 报 `duplicated mapping key`
+   （CI 报 `ERR_PNPM_BROKEN_LOCKFILE`）。合并后必查：
+
+   ```sh
+   node -e "require('yaml').parse(require('fs').readFileSync('pnpm-lock.yaml','utf8'))" \
+     && echo OK   # 严格解析：有重复键就抛 Map keys must be unique
+   ```
+
+   修复只删重复条目，再用 `pnpm install --lockfile-only` 验证输出字节不变
+   （证明仍是 pnpm 规范输出）。更稳妥的做法：Dependabot PR 合并前先
+   `@dependabot rebase`，让分支基于当前 main 重生成锁文件再合。
 
 ## 安全 CI 三件套
 
@@ -80,7 +94,8 @@ npm 包页 → Settings → Trusted Publishing → Add：
 | Dependabot | `.github/dependabot.yml` | npm + Actions 每周升级 PR，与 audit 门禁形成「挡住→升级→修复」闭环 |
 
 - CodeQL 告警：仓库 **Security → Code scanning**；误报可在 UI 关闭对应规则
-- Dependabot 升级 PR 走完整 CI，正常 squash 合并即可
+- Dependabot 升级 PR 走完整 CI，正常 squash 合并即可；但**依赖类 PR 一次只合一个**，
+  每个合完跑一次锁文件严格解析（见「踩坑记录」第 7 条），否则会出现重复映射键把 main CI 打红
 
 ## 本地环境注意
 
