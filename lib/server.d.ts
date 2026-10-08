@@ -49,7 +49,7 @@ export interface HookRoutesOptions {
 export declare function describeHooks(hooks: readonly HookSpec[]): {
     index: number;
     on: "agent/created" | "agent/disposed" | "agent/error" | "agent/status" | "approval/asked" | "approval/decided" | "hook/failed" | "session/created" | "session/disposed" | "session/title" | "step/end" | "tool/call" | "tool/result" | "tree/settled" | "turn/end" | "turn/start" | "usage/daily" | "user/message";
-    when: "aborted" | "blocked" | "completed" | "error" | "interrupted" | "max-tokens" | undefined;
+    when: "aborted" | "blocked" | "completed" | "error" | "forked" | "interrupted" | "max-tokens" | undefined;
     match: {
         [k: string]: string;
     } | undefined;

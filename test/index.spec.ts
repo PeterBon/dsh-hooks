@@ -181,7 +181,7 @@ describe('inspectSubagentTree', () => {
     list: () => [parent, runningChild, idleChild],
     isOwnedBy: () => false,
   }
-  const descendants = (rows: Array<{ id: string }>) => ({ listDescendants: async () => rows })
+  const descendants = (rows: Array<{ id: string; kind?: string }>) => ({ listDescendants: async () => rows })
 
   it('reports running and total from the durable tree', async () => {
     await expect(inspectSubagentTree(agents, descendants([{ id: 'sub-1' }, { id: 'sub-2' }]), 'session-main')).resolves.toEqual({
@@ -204,6 +204,18 @@ describe('inspectSubagentTree', () => {
   it('falls back to the registry scan for both counts', async () => {
     const owned = { ...agents, isOwnedBy: (id: string) => id === 'sub-1' }
     await expect(inspectSubagentTree(owned, undefined, 'session-main')).resolves.toEqual({ running: 1, total: 1 })
+  })
+
+  it('keeps dsh 0.2 diagnostic rows out of the descendant total', async () => {
+    const rows = [
+      { id: 'sub-1', kind: 'child' },
+      { id: 'sub-broken', kind: 'diagnostic' },
+      { id: 'sub-2', kind: 'child' },
+    ]
+    await expect(inspectSubagentTree(agents, descendants(rows), 'session-main')).resolves.toEqual({
+      running: 1,
+      total: 2,
+    })
   })
 })
 

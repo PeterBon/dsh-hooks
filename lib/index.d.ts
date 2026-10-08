@@ -21,6 +21,7 @@ interface AgentsLike {
 interface SubagentsLike {
     listDescendants(rootSessionId: string): Promise<Array<{
         id?: string;
+        kind?: string;
     }>>;
 }
 /** Snapshot of one session's subagent tree: live-running plus total descendants. */
@@ -38,8 +39,10 @@ export interface SubagentTreeStats {
  * in the agents registry is the subagent manager's host-level scope, not the
  * parent agent, so ownership chains (`agents.isOwnedBy`) cannot find children.
  * Only agents whose live status is `running` count as running — a settled/idle
- * continuable child does not. Returns `{ running: 0, total: 0 }` when the
- * session has no live agent or the services are unavailable.
+ * continuable child does not. Diagnostic rows (dsh 0.2's marker for a child
+ * whose record could not be read) are not descendants and are left out of both
+ * counts. Returns `{ running: 0, total: 0 }` when the session has no live agent
+ * or the services are unavailable.
  *
  * The live-registry scan is strictly a fallback for when listing is
  * unavailable (service absent or listing threw): a successful empty listing

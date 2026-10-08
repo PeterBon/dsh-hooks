@@ -32,6 +32,10 @@ export const TURN_END_REASONS = [
   'blocked',
   'max-tokens',
   'interrupted',
+  // Added by dsh 0.2: only fork-seed construction carries this marker (the
+  // agent loop never emits it), so a `when: forked` hook fires only while
+  // replaying a fork seed.
+  'forked',
 ] as const
 
 export type TurnEndReasonKind = (typeof TURN_END_REASONS)[number]

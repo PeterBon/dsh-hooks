@@ -41,7 +41,7 @@ describe('Config schema', () => {
   })
 
   it('accepts every known turn/end reason kind as when', () => {
-    for (const kind of ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted']) {
+    for (const kind of ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted', 'forked']) {
       const result = Config({ hooks: [{ on: 'turn/end', when: kind, run: 'x' }] })
       expect(result.hooks?.[0]?.when).toBe(kind)
     }
@@ -79,7 +79,7 @@ describe('Config schema', () => {
   })
 
   it('declares all turn/end reason kinds', () => {
-    for (const kind of ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted']) {
+    for (const kind of ['completed', 'error', 'aborted', 'blocked', 'max-tokens', 'interrupted', 'forked']) {
       expect(TURN_END_REASONS).toContain(kind)
     }
   })

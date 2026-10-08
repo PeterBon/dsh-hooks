@@ -9,7 +9,11 @@
  * logged, never thrown — a plugin apply that throws fails the whole web
  * shell boot.
  */
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
+// Type-only: the renderer owns the browser-side slot registry and declares
+// `ctx.slots` on the cordis Context (dsh 0.2 removed the dsh-client-runtime
+// package that used to carry that declaration).
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
 import { HooksSettingsCard } from './settings-card.tsx'
 import cardCss from './settings-card.module.css?inline'

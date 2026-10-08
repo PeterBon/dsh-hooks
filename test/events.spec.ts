@@ -505,6 +505,37 @@ describe('new firehose events', () => {
     expect(ctx?.toolDurationMs).toBeGreaterThanOrEqual(0)
   })
 
+  it('classifies the dsh 0.2 tool/result shape (message-level id, direct blocks)', () => {
+    const session = fakeSession('s1')
+    classifySessionEvent(
+      session,
+      sessionEvent('tool/call', { turn: 2, step: 1, callId: 'call-11', name: 'read', arguments: '{}' }),
+    )
+    const ctx = classifySessionEvent(
+      session,
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        // 0.2 dropped the `tool-result` wrapper block: the output blocks sit
+        // directly on the message and the call id is message-level.
+        message: { id: 'm3', role: 'tool', toolCallId: 'call-11', content: [textBlock('0.2 输出')], source: { kind: 'tool', callId: 'call-11' } },
+      }),
+    )
+    expect(ctx).toMatchObject({ event: 'tool/result', tool: 'read', callId: 'call-11', content: '0.2 输出' })
+  })
+
+  it('resolves the call id from the message when the source carries none', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        message: { id: 'm4', role: 'tool', toolCallId: 'call-12', content: [textBlock('仅 message 级 id')], source: { kind: 'tool' } },
+      }),
+    )
+    expect(ctx).toMatchObject({ event: 'tool/result', callId: 'call-12', content: '仅 message 级 id' })
+  })
+
   it('leaves toolDurationMs undefined when the pairing call was never seen', () => {
     const ctx = classifySessionEvent(
       fakeSession('s1'),
