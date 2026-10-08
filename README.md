@@ -371,7 +371,7 @@ In the web profile (when the shared webServer service exists) dsh-hooks register
 | `/dsh-hooks/feishu/test` | POST | send a test card with the stored credentials |
 | `/dsh-hooks/feishu/disconnect` | POST | disconnect: delete the credential file; `removeHooks: true` also drops the hooks referencing notify-feishu.mjs (with a backup) |
 
-POSTs require `application/json` in every access mode (blocks cross-site form CSRF). The web profile also gets a systemPrompt section announcing the plugin to agents.
+POSTs require `application/json` in every access mode (blocks cross-site form CSRF), and every request must carry a trusted `Host`/`Origin` hostname (see [Configure the Host / Origin fence](#configure-the-host--origin-fence-dns-rebinding)). The web profile also gets a systemPrompt section announcing the plugin to agents.
 
 ### Configure HTTP source IP access
 
@@ -386,6 +386,25 @@ Set `DSH_HOOKS_ALLOWED_IPS` in the **environment of the process running `dsh web
 Leading and trailing whitespace is removed. `local` and `all` are not special values: anything other than a blank value or a standalone `*` is matched as an IP list. Allowlist mode **does not implicitly allow loopback connections**; include `127.0.0.1,::1` explicitly if you need local access.
 
 Matching ignores surrounding whitespace, letter case, and the `::ffff:` prefix on each address, so `192.168.1.100` matches `::ffff:192.168.1.100`. Hostnames, ports, CIDR ranges, and wildcards within a list are not supported. Invalid entries do not trigger a fallback to loopback-only or unrestricted access. IPv6 matching compares strings after this normalization, without expanding or compressing IPv6 notation; use the representation observed by the server.
+
+#### Configure the Host / Origin fence (DNS rebinding)
+
+`DSH_HOOKS_ALLOWED_IPS` only looks at the TCP peer address, which cannot see DNS rebinding: a malicious page that resolves a hostname to `127.0.0.1` reaches the server from loopback while the browser treats it as same-origin. `/dsh-hooks/*` therefore also validates the `Host` (and `Origin`, when present) hostname; anything untrusted gets a 403:
+
+| Case | Behavior |
+| --- | --- |
+| `Host` is `localhost` / `127.0.0.1` / `[::1]` (port optional) | Allowed |
+| `Host` is any other hostname | Rejected unless listed in `DSH_HOOKS_ALLOWED_HOSTS` |
+| No `Host` header | Allowed — every browser sends one, so its absence means a non-browser caller on this machine |
+| `Origin` present with an untrusted hostname | Rejected |
+
+**Behind a tunnel or reverse proxy** (e.g. `https://dsh.peterbon.top`) the proxy connects from loopback but forwards the public hostname, so set `DSH_HOOKS_ALLOWED_HOSTS` in the `dsh web` process environment or the panel will 403:
+
+| Environment variable value | Behavior |
+| --- | --- |
+| Unset, empty | Only loopback hostnames are trusted |
+| `dsh.peterbon.top` | Additionally trusts that hostname (comma-separated for several; hostname only, no port) |
+| `*` | Skips hostname validation (make sure external access control is sound first) |
 
 #### Direct startup
 

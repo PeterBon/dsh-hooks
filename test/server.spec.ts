@@ -594,3 +594,158 @@ describe('history disk sync on routes', () => {
     expect(value.map((r) => r.event)).toEqual(['turn/end', 'tool/call'])
   })
 })
+
+describe('profile containment on the write routes', () => {
+  let tmp: string
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'dsh-hooks-profile-'))
+  })
+
+  afterEach(() => {
+    rmSync(tmp, { recursive: true, force: true })
+  })
+
+  function fakeFeishuManager(): FeishuSetupManager {
+    return {
+      start: vi.fn(async () => ({ status: 'pending', startedAt: 1 })),
+      status: vi.fn(() => null),
+      cancel: vi.fn(() => false),
+      dispose: vi.fn(() => {}),
+    } as unknown as FeishuSetupManager
+  }
+
+  it('rejects a traversal profile on /hooks/save without resolving any path', async () => {
+    const resolvePatchFile = vi.fn(() => join(tmp, 'never.yml'))
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }), resolvePatchFile })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/hooks/save', { profile: '../../evil', hooks }), res)
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(400)
+    expect(body).toMatchObject({ ok: false, error: { code: 'bad-request' } })
+    expect(resolvePatchFile).not.toHaveBeenCalled()
+    expect(existsSync(join(tmp, 'never.yml'))).toBe(false)
+  })
+
+  it('rejects an absolute-path profile on /hooks/save', async () => {
+    const resolvePatchFile = vi.fn(() => join(tmp, 'never.yml'))
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }), resolvePatchFile })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/hooks/save', { profile: 'C:\\Windows\\Temp\\pwn', hooks }), res)
+    expect(readJson(res).statusCode).toBe(400)
+    expect(resolvePatchFile).not.toHaveBeenCalled()
+  })
+
+  it('still saves an ordinary profile name', async () => {
+    const targets: string[] = []
+    const handler = createHookHandler({
+      hooks,
+      history: createHistorySink({ enabled: false }),
+      resolvePatchFile: (profile: string) => {
+        targets.push(profile)
+        return join(tmp, `${profile}.yml`)
+      },
+    })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/hooks/save', { profile: 'work', hooks }), res)
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(200)
+    expect(body).toMatchObject({ ok: true, value: { profile: 'work', hookCount: hooks.length } })
+    expect(targets).toEqual(['work'])
+    expect(existsSync(join(tmp, 'work.yml'))).toBe(true)
+  })
+
+  it('rejects traversal profiles on the Feishu routes', async () => {
+    const manager = fakeFeishuManager()
+    const resolvePatchFile = vi.fn(() => join(tmp, 'never.yml'))
+    const handler = createHookHandler({
+      hooks,
+      history: createHistorySink({ enabled: false }),
+      feishu: { manager, configPath: join(tmp, 'feishu-config.json') },
+      resolvePatchFile,
+    })
+
+    const setupRes = fakeRes()
+    await handler(bodyReq('/dsh-hooks/feishu/setup', { profile: '../..' }), setupRes)
+    expect(readJson(setupRes).statusCode).toBe(400)
+    expect(manager.start).not.toHaveBeenCalled()
+
+    const disconnectRes = fakeRes()
+    await handler(bodyReq('/dsh-hooks/feishu/disconnect', { profile: '..\\..\\web', removeHooks: true }), disconnectRes)
+    expect(readJson(disconnectRes).statusCode).toBe(400)
+    expect(resolvePatchFile).not.toHaveBeenCalled()
+  })
+})
+
+describe('Host/Origin fence (DNS rebinding)', () => {
+  const history = createHistorySink({ enabled: false })
+
+  async function withAllowedHosts(value: string | undefined, body: () => Promise<void>): Promise<void> {
+    const previous = process.env.DSH_HOOKS_ALLOWED_HOSTS
+    if (value === undefined) delete process.env.DSH_HOOKS_ALLOWED_HOSTS
+    else process.env.DSH_HOOKS_ALLOWED_HOSTS = value
+    try {
+      await body()
+    } finally {
+      if (previous === undefined) delete process.env.DSH_HOOKS_ALLOWED_HOSTS
+      else process.env.DSH_HOOKS_ALLOWED_HOSTS = previous
+    }
+  }
+
+  async function status(headers: Record<string, string>): Promise<{ statusCode: number; body: unknown }> {
+    const handler = createHookHandler({ hooks, history })
+    const res = fakeRes()
+    await handler(fakeReq({ headers }), res)
+    return readJson(res)
+  }
+
+  it('rejects a rebound hostname', async () => {
+    await withAllowedHosts(undefined, async () => {
+      const { statusCode, body } = await status({ host: 'evil.example' })
+      expect(statusCode).toBe(403)
+      expect(body).toMatchObject({ ok: false, error: { code: 'forbidden' } })
+    })
+  })
+
+  it('accepts every loopback host form a browser may use', async () => {
+    await withAllowedHosts(undefined, async () => {
+      for (const host of ['127.0.0.1:3080', 'localhost:3080', '[::1]:3080', '127.0.0.1']) {
+        expect((await status({ host })).statusCode, host).toBe(200)
+      }
+    })
+  })
+
+  it('accepts an explicitly allowed tunnel hostname', async () => {
+    await withAllowedHosts('dsh.peterbon.top', async () => {
+      expect((await status({ host: 'dsh.peterbon.top' })).statusCode).toBe(200)
+      expect((await status({ host: 'dsh.peterbon.top:443' })).statusCode).toBe(200)
+      expect((await status({ host: 'other.example' })).statusCode).toBe(403)
+    })
+  })
+
+  it('accepts any host when the allowlist is *', async () => {
+    await withAllowedHosts('*', async () => {
+      expect((await status({ host: 'evil.example' })).statusCode).toBe(200)
+    })
+  })
+
+  it('rejects a cross-origin Origin even when Host is loopback', async () => {
+    await withAllowedHosts(undefined, async () => {
+      const { statusCode } = await status({ host: '127.0.0.1:3080', origin: 'http://evil.example' })
+      expect(statusCode).toBe(403)
+    })
+  })
+
+  it('accepts a loopback Origin and rejects a malformed one', async () => {
+    await withAllowedHosts(undefined, async () => {
+      expect((await status({ host: '127.0.0.1:3080', origin: 'http://127.0.0.1:3080' })).statusCode).toBe(200)
+      expect((await status({ host: '127.0.0.1:3080', origin: 'not a url' })).statusCode).toBe(403)
+    })
+  })
+
+  it('allows an absent Host for non-browser callers on this machine', async () => {
+    await withAllowedHosts(undefined, async () => {
+      expect((await status({})).statusCode).toBe(200)
+    })
+  })
+})
