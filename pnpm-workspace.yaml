@@ -12,6 +12,10 @@ allowBuilds:
 # GHSA-2883-xcg3-v3hh: js-yaml >=4.0.0 <4.3.2 unbounded CPU on empty merge keys
 # (via @deepseek-ai/cordis -> cordis-plugin-include). Same treatment: pin the
 # patched 4.x line until the cordis chain ships it.
+# GHSA-68fv-2mgg-jv7q: source-map-js <1.2.2 event-loop DoS (via @tsdown/css ->
+# postcss). postcss's ^1.2.1 range already admits 1.2.2, but the lockfile kept
+# the old resolution, so force the patched version like the two above.
 overrides:
   ansi-regex: ^5.0.1
   js-yaml: ^4.3.2
+  source-map-js: ^1.2.2
