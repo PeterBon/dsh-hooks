@@ -91,7 +91,7 @@ Every hook field:
 | Event | When it fires | Useful context |
 | --- | --- | --- |
 | `turn/start` | A turn begins (with `turn/start` hooks, dispatch waits for the turn's first direct user message and attaches its text as `DSH_HOOK_CONTENT`; turns without one dispatch content-less at `turn/end`, see below) | session id, turn, initiating message text |
-| `turn/end` | A turn ends (`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`) | reason, turn, duration, content, turn token usage, running subagents |
+| `turn/end` | A turn ends (`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted` / `forked`) | reason, turn, duration, content, turn token usage, running subagents |
 | `tree/settled` | A watched session's whole subagent tree settles (no live child still running) after a turn ended with work handed off | total subagents, handoff→settle duration |
 | `step/end` | One step of a turn ends (one model call plus its tool executions) | turn, step |
 | `tool/call` | The model requests one tool invocation | tool name, call id, raw arguments JSON |
@@ -109,7 +109,7 @@ Every hook field:
 | `hook/failed` | A hook fails consecutively past `failedAlertThreshold` (default 3; synthetic, emitted from the outcome stream) | failing hook summary, consecutive failure count |
 | `usage/daily` | The first event after the local calendar day rolls over (synthetic, no timers): reports the token usage of the day that just ended | covered day, turns that day, contributing sessions, day's token totals |
 
-The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `error`, …). Hooks for other events run unconditionally.
+The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `error`, `aborted`, `blocked`, `max-tokens`, `interrupted`, `forked`). `forked` is produced only by fork-seed construction — the agent loop never emits it — so `when: forked` matches only while a fork seed is replayed. Hooks for other events run unconditionally.
 
 ## Command execution
 
@@ -521,7 +521,7 @@ Hooks execute arbitrary commands with the dsh process privileges. Only configure
 
 ## Design
 
-Follows the dsh plugin conventions: `dsh.bundle.patch` mounts the plugin row, the plugin listens to the durable `session/event` firehose plus agent lifecycle events, and emissions are irreversible side effects that compensate rather than block (failures warn, never retry).
+Follows the dsh plugin conventions: `dsh.bundle.patch` mounts the plugin row, the plugin listens to the durable `session/event` firehose plus agent lifecycle events, and emissions are irreversible side effects that compensate rather than block (failures warn and never block the agent loop; nothing retries unless `retries` is configured).
 
 ## Development
 

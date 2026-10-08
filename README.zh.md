@@ -91,7 +91,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | 事件 | 触发时机 | 有用上下文 |
 | --- | --- | --- |
 | `turn/start` | 回合开始（若有 `turn/start` hook，派发延迟到本回合的首条用户消息分类后，把触发文本注入 `DSH_HOOK_CONTENT`；无用户消息的回合在 `turn/end` 时无内容派发，见下方说明） | 会话 id、回合号、触发消息文本 |
-| `turn/end` | 回合结束（`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted`） | reason、回合号、耗时、内容、本回合 token 用量、运行中子代理数 |
+| `turn/end` | 回合结束（`completed` / `error` / `aborted` / `blocked` / `max-tokens` / `interrupted` / `forked`） | reason、回合号、耗时、内容、本回合 token 用量、运行中子代理数 |
 | `tree/settled` | 回合结束后把工作交给子代理的会话，其整个子代理树全部落定（无存活子代理仍在运行） | 子代理总数、交接到落定的耗时 |
 | `step/end` | 回合内一步结束（一次模型调用 + 其工具执行） | 回合号、步号 |
 | `tool/call` | 模型请求一次工具调用 | 工具名、调用 id、原始参数 JSON |
@@ -109,7 +109,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `hook/failed` | 同一 hook 连续失败达到 `failedAlertThreshold`（默认 3；合成事件，从结果流发射） | 失败 hook 摘要、连续失败次数 |
 | `usage/daily` | 本地日历日翻篇后的下一个事件（合成事件，无定时器）：报告刚结束那一天的 token 用量 | 覆盖日期、当日回合数、贡献会话数、当日 token 明细 |
 
-`turn/end` 的 `when` 匹配结束原因（`completed`、`error`…）；其他事件的 hook 无条件执行。
+`turn/end` 的 `when` 匹配结束原因（`completed`、`error`、`aborted`、`blocked`、`max-tokens`、`interrupted`、`forked`）；其他事件的 hook 无条件执行。其中 `forked` 只由 fork seed 构造产生（agent loop 不会发射），因此 `when: forked` 只会在重放 fork seed 时命中。
 
 ## 命令执行
 
@@ -524,7 +524,7 @@ Hook 会以 dsh 进程的权限执行任意命令，只配置你信任的命令�
 
 ## 设计
 
-遵循 dsh 插件约定：`dsh.bundle.patch` 挂载插件行；插件监听持久 `session/event` firehose 与 agent 生命周期事件；发射是不可逆副作用，补偿而非阻塞（失败仅警告、绝不重试）。
+遵循 dsh 插件约定：`dsh.bundle.patch` 挂载插件行；插件监听持久 `session/event` firehose 与 agent 生命周期事件；发射是不可逆副作用，补偿而非阻塞（失败仅警告、绝不阻塞 agent 循环；默认不重试，只有显式配置 `retries` 才对非零退出重试）。
 
 ## 开发
 

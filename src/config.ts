@@ -172,7 +172,7 @@ export const Config: {
         '触发事件：turn/start | turn/end | tree/settled | step/end | tool/call | tool/result | user/message | approval/asked | approval/decided | session/title | session/created | session/disposed | agent/created | agent/disposed | agent/error | agent/status | hook/failed | usage/daily',
       ),
       when: Schema.union([...TURN_END_REASONS]).description(
-        '可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted）；其他事件忽略该字段',
+        '可选过滤：对 turn/end 匹配结束原因（completed/error/aborted/blocked/max-tokens/interrupted/forked；forked 仅重放 fork seed 时出现）；其他事件忽略该字段',
       ),
       match: Schema.dict(
         Schema.union([
