@@ -6,6 +6,7 @@ import {
   agentStatusContext,
   approvalContext,
   classifySessionEvent,
+  clearSessionTracking,
   errorText,
   hookFailedContext,
   hookMatches,
@@ -757,5 +758,42 @@ describe('session event-log compatibility (#101)', () => {
     expect(sessionTitle(hostile)).toBeUndefined()
     expect(turnContent(hostile, 1)).toBeUndefined()
     expect(turnUsage(hostile, 1)).toBeUndefined()
+  })
+})
+
+describe('clearSessionTracking', () => {
+  it('drops one session\'s turn, tool and approval pairings, leaving other sessions alone', () => {
+    const gone = fakeSession('s-gone')
+    const kept = fakeSession('s-kept')
+
+    classifySessionEvent(gone, sessionEvent('turn/start', { turn: 1 }))
+    classifySessionEvent(
+      gone,
+      sessionEvent('tool/call', { turn: 1, step: 1, callId: 'c1', name: 'pwsh', arguments: '{}' }),
+    )
+    classifySessionEvent(gone, sessionEvent('approval/asked', { id: 'a1', toolName: 'pwsh' }))
+    classifySessionEvent(kept, sessionEvent('turn/start', { turn: 1 }))
+
+    clearSessionTracking(gone)
+
+    // The disposed session's pairings are gone: no tool name back-fill, no
+    // turn duration, no approval tool identity.
+    const result = classifySessionEvent(
+      gone,
+      sessionEvent('tool/result', {
+        turn: 1,
+        step: 1,
+        message: { content: [textBlock('out')], source: { kind: 'tool', callId: 'c1' } },
+      }),
+    )
+    expect(result?.tool).toBeUndefined()
+    expect(classifySessionEvent(gone, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }))?.durationMs)
+      .toBeUndefined()
+    expect(classifySessionEvent(gone, sessionEvent('approval/decided', { id: 'a1', outcome: 'allowed-once' }))?.tool)
+      .toBeUndefined()
+
+    // Another session's pairing state is untouched.
+    const keptEnd = classifySessionEvent(kept, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }))
+    expect(keptEnd?.durationMs).toBeTypeOf('number')
   })
 })

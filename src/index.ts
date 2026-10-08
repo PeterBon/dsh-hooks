@@ -8,6 +8,7 @@ import {
   agentErrorContext,
   agentStatusContext,
   classifySessionEvent,
+  clearSessionTracking,
   clearTurnTracking,
   hookFailedContext,
   hookMatches,
@@ -191,21 +192,26 @@ export function apply(ctx: Context, config: Config = {}) {
       if (!matchFilters(hook.match, ctxValue)) return
       const debounceMs = hook.debounceMs ?? 0
       if (debounceMs > 0) {
-        // Trailing-edge merge: triggers inside the window collapse into one
-        // execution carrying the latest context. Dropped triggers stay silent
-        // so high-frequency events cannot flood the log/history.
-        const pending = debounceTimers.get(index)
+        // Trailing-edge merge, scoped to one hook AND one session: triggers
+        // inside the window collapse into one execution carrying the latest
+        // context. Keying by hook index alone merged *different* sessions into
+        // a single execution (the later session's context silently replaced the
+        // earlier one), which matters for the per-session step/tool events.
+        // Dropped triggers stay silent so high-frequency events cannot flood
+        // the log/history.
+        const debounceKey = `${index}\u0000${ctxValue.sessionId ?? ''}`
+        const pending = debounceTimers.get(debounceKey)
         if (pending !== undefined) {
           pending.ctx = ctxValue
           return
         }
         const timer = setTimeout(() => {
-          const armed = debounceTimers.get(index)
-          debounceTimers.delete(index)
+          const armed = debounceTimers.get(debounceKey)
+          debounceTimers.delete(debounceKey)
           if (armed !== undefined) dispatchHook(hook, index, armed.ctx)
         }, debounceMs)
         timer.unref?.()
-        debounceTimers.set(index, { timer, ctx: ctxValue })
+        debounceTimers.set(debounceKey, { timer, ctx: ctxValue })
         return
       }
       dispatchHook(hook, index, ctxValue)
@@ -259,8 +265,9 @@ export function apply(ctx: Context, config: Config = {}) {
     console.warn(`[dsh-hooks] hook 既没有 run 也没有 notify，已跳过：${eventLabel(ctxValue)}`)
   }
 
-  // Per-hook debounce state (trailing timers); cleared on dispose.
-  const debounceTimers = new Map<number, { timer: ReturnType<typeof setTimeout>; ctx: HookContext }>()
+  // Per-hook-and-session debounce state (trailing timers); keyed by
+  // `hookIndex\0sessionId`; cleared on dispose.
+  const debounceTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; ctx: HookContext }>()
 
   // Synthetic usage/daily: an in-memory per-day token bucket. Bookkeeping is
   // wired only when a usage/daily hook exists — with none declared, no
@@ -312,27 +319,60 @@ export function apply(ctx: Context, config: Config = {}) {
     startedAt: number
   }
   const watchedTrees = new Map<string, WatchedTree>()
+  /**
+   * Bumped every time a session's watch is armed or dropped. A refresh claims a
+   * generation before awaiting `listDescendants` and only reports a settle when
+   * that generation is still current — otherwise a hand-off that arrived while
+   * the check was in flight would be settled on a stale verdict, reporting a
+   * tree as settled while its newly dispatched subagents are still running.
+   */
+  const watchGeneration = new Map<string, number>()
+
+  const bumpWatchGeneration = (sessionId: string): number => {
+    const next = (watchGeneration.get(sessionId) ?? 0) + 1
+    watchGeneration.set(sessionId, next)
+    return next
+  }
+
+  /** Arm (or re-arm) the settle watch for a session. */
+  const armWatchedTree = (sessionId: string, watch: WatchedTree): void => {
+    bumpWatchGeneration(sessionId)
+    watchedTrees.set(sessionId, watch)
+  }
+
+  /** Drop a session's watch (dispose, or a turn that no longer hands off). */
+  const dropWatchedTree = (sessionId: string): void => {
+    bumpWatchGeneration(sessionId)
+    watchedTrees.delete(sessionId)
+  }
 
   /**
    * Re-check every watched tree on subagent-activity signals (any turn/end or
-   * agent/status). Each entry is claimed (deleted) before its await, so a
-   * concurrent refresh can never emit the same settle twice; entries whose
-   * tree is still running are re-armed. Best-effort: a failed re-check or a
-   * vanished service drops the watch silently instead of leaking it.
+   * agent/status). Each entry is claimed (deleted) before its await and carries
+   * the claim's generation, so a verdict that a newer hand-off (or a dispose)
+   * has already superseded is dropped instead of emitted; entries whose tree is
+   * still running are re-armed. Best-effort: a failed re-check or a vanished
+   * service drops the watch silently instead of leaking it.
    */
   const refreshWatchedTrees = async (): Promise<void> => {
     if (watchedTrees.size === 0) return
     const agents = ctx.get('agents', false) as AgentsLike | undefined
     if (agents === undefined) {
       watchedTrees.clear()
+      watchGeneration.clear()
       return
     }
     const subagents = ctx.get('subagents', false) as SubagentsLike | undefined
     for (const [sessionId, entry] of [...watchedTrees]) {
+      const claimed = bumpWatchGeneration(sessionId)
       watchedTrees.delete(sessionId)
       try {
         const { running, total } = await inspectSubagentTree(agents, subagents, sessionId)
+        // A newer hand-off (or a dispose) owns this session now: that refresh
+        // will decide, so a stale "settled" must not be emitted here.
+        if (watchGeneration.get(sessionId) !== claimed) continue
         if (running === 0) {
+          watchGeneration.delete(sessionId)
           runMatching(treeSettledContext(entry.session, total, Date.now() - entry.startedAt))
         } else {
           watchedTrees.set(sessionId, entry)
@@ -360,10 +400,11 @@ export function apply(ctx: Context, config: Config = {}) {
         ctxValue.runningSubagents = running
         if (running > 0) {
           // Work was handed off: watch this tree until it settles. A re-handoff
-          // on a later turn restarts the settle clock from that turn/end.
-          watchedTrees.set(sessionId, { session, startedAt: Date.now() })
+          // on a later turn restarts the settle clock from that turn/end (and
+          // supersedes any refresh already in flight).
+          armWatchedTree(sessionId, { session, startedAt: Date.now() })
         } else {
-          watchedTrees.delete(sessionId)
+          dropWatchedTree(sessionId)
         }
       } catch (error) {
         ctx.logger?.warn?.('[dsh-hooks] failed to count running subagents: %s', String(error))
@@ -430,9 +471,12 @@ export function apply(ctx: Context, config: Config = {}) {
     runMatching(sessionCreatedContext(session))
   })
   ctx.on('session/disposed', (session: Session) => {
-    watchedTrees.delete(String(session.id))
+    dropWatchedTree(String(session.id))
     // A disposed session never completes its deferred turn/start — drop it.
     pendingTurnStarts.delete(String(session.id))
+    // Its unpaired turn/tool/approval bookkeeping is dead too: without this the
+    // module-level pairing maps grow for the life of the host process.
+    clearSessionTracking(session)
     runMatching(sessionDisposedContext(session))
     // A child session leaving the store is also settle-relevant activity.
     void refreshWatchedTrees().catch((error: unknown) => {

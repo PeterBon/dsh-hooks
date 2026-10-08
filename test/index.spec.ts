@@ -684,6 +684,65 @@ describe('per-hook execution options (#81)', () => {
     }
   })
 
+  it('debounces per hook and session, so two sessions are not merged', () => {
+    vi.useFakeTimers()
+    try {
+      fakeChildRef = fakeChild()
+      spawnMock.mockReturnValue(fakeChildRef as never)
+      const { ctx, listeners } = fakeCtx({})
+      apply(ctx, { hooks: [{ on: 'step/end', run: 'echo step', debounceMs: 100 }], history: { enabled: false } })
+      const sessionEvent = listeners.get('session/event')
+      const other = { id: 'session-other', header: { cwd: 'C:/tmp' }, events: [] }
+      sessionEvent?.[0]?.(sessionObj, { type: 'step/end', data: { turn: 1, step: 1 } })
+      sessionEvent?.[0]?.(other, { type: 'step/end', data: { turn: 1, step: 1 } })
+      vi.advanceTimersByTime(100)
+      // One execution per session: neither trigger is swallowed by the other.
+      expect(spawnMock).toHaveBeenCalledTimes(2)
+      const ids = spawnMock.mock.calls.map(
+        ([, options]) => (options as { env: Record<string, string> }).env.DSH_HOOK_SESSION_ID,
+      )
+      expect(new Set(ids)).toEqual(new Set([String(sessionObj.id), 'session-other']))
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('drops a disposed session\'s pairing state (turn duration and tool back-fill)', () => {
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+    const { ctx, listeners } = fakeCtx({})
+    apply(ctx, {
+      hooks: [
+        { on: 'tool/result', run: 'echo result' },
+        { on: 'turn/end', run: 'echo end' },
+      ],
+      history: { enabled: false },
+    })
+    const sessionEvent = listeners.get('session/event')
+    const disposed = listeners.get('session/disposed')
+    const session = { id: 'session-gone', header: { cwd: 'C:/tmp' }, events: [] }
+
+    sessionEvent?.[0]?.(session, { type: 'turn/start', data: { turn: 1 } })
+    sessionEvent?.[0]?.(session, {
+      type: 'tool/call',
+      data: { turn: 1, step: 1, callId: 'c1', name: 'pwsh', arguments: '{}' },
+    })
+    disposed?.[0]?.(session)
+
+    sessionEvent?.[0]?.(session, {
+      type: 'tool/result',
+      data: { turn: 1, step: 1, message: { content: [{ type: 'text', text: 'out' }], source: { kind: 'tool', callId: 'c1' } } },
+    })
+    sessionEvent?.[0]?.(session, { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } })
+
+    // Without the dispose-time cleanup these would still carry the remembered
+    // tool name / start timestamp — the maps they live in never shrink.
+    const envOf = (call: number) =>
+      (spawnMock.mock.calls[call]?.[1] as { env?: Record<string, string | undefined> } | undefined)?.env ?? {}
+    expect(envOf(0).DSH_HOOK_TOOL).toBeUndefined()
+    expect(envOf(1).DSH_HOOK_DURATION_MS).toBeUndefined()
+  })
+
   it('does not debounce when debounceMs is absent', () => {
     const { emit } = wire({
       hooks: [{ on: 'step/end', run: 'echo step' }],

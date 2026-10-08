@@ -75,6 +75,17 @@ export declare function turnContent(session: Session, turn: number): string | un
 export declare function turnUsage(session: Session, turn: number): UsageTotals | undefined;
 export declare function rememberTurnStart(session: Session): void;
 export declare function clearTurnTracking(session: Session): void;
+/**
+ * Drop every pairing this session left behind: its turn-start timestamp, its
+ * in-flight `tool/call` entries, and its pending `approval/asked` entries.
+ *
+ * Called when a session leaves the store. Without it the three maps above grow
+ * for the life of the host process — a `tool/call` whose result never arrives
+ * (interrupted turn, killed subagent) or an unanswered approval keeps its entry
+ * forever, and every session that starts a turn without a normal `turn/end`
+ * leaves a timestamp behind.
+ */
+export declare function clearSessionTracking(session: Session): void;
 /** Does a declared hook match this event (type + optional `when` filter)? */
 export declare function hookMatches(spec: HookSpec, event: string, reasonKind?: TurnEndReasonKind): boolean;
 /**
