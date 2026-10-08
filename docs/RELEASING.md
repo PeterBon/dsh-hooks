@@ -29,6 +29,13 @@ tag 推送后 `publish.yml` 自动完成：
 
 **无需任何 token**：npm 发布走 Trusted Publishing（OIDC），GitHub Release 走 `GITHUB_TOKEN`。
 
+npm 侧会先回一句「being processed and may take a few minutes to become available」——本机 npm
+源是 npmmirror，必须查官方源才能确认落地：
+`npm view dsh-hooks@<版本> version --registry=https://registry.npmjs.org`。
+
+发布本身不等于「本机在跑新版」：profile 里的依赖和 `compatibility.json` 的版本豁免都要单独收尾，
+见「踩坑记录」第 8、9 条。
+
 ## 发布链路的安全设计
 
 | 层 | 内容 |
@@ -84,6 +91,28 @@ npm 包页 → Settings → Trusted Publishing → Add：
    修复只删重复条目，再用 `pnpm install --lockfile-only` 验证输出字节不变
    （证明仍是 pnpm 规范输出）。更稳妥的做法：Dependabot PR 合并前先
    `@dependabot rebase`，让分支基于当前 main 重生成锁文件再合。
+
+8. **dsh 升大版本时，插件必须同步改 `peerDependencies` 的宿主下限，否则会被静默禁用**。
+   宿主只检查 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 这几条 peer
+   （`dsh-app-boot` 的 `evaluatePluginCompatibility`，semver 带 `includePrerelease`），
+   而 `^0.1.0-rc.6` 这类范围反解出的上界是 `0.2.0-0` → 在 0.2 运行时上判 false：
+   preflight 会把该插件行置 `disabled`，只在启动 stderr 留一行，**服务器本身照样健康**
+   （所以只看 `/degraded` 会发现不了）。改之前只能靠 `compatibility.json` 的精确豁免硬撑。
+   预发布版本要写足：`^0.2.0-rc.2` 通过，`^0.2.0` 同样 false。
+   只有 `peerDependencies` 参与判定，`dsh.engines.dsh` 不参与。
+   顺带核对客户端半边：0.2 删掉了 `@deepseek-ai/dsh-client-runtime`（`ClientContext` 改从
+   `@deepseek-ai/cordis` 导入），`ctx.slots` 的类型声明改由
+   `@deepseek-ai/dsh-client-ui-renderer/client` 提供，`dsh.client.inject` 也要跟着列真实存在的
+   客户端模块。（实例：dsh-hooks 0.13.1 → 0.14.0，PR #118。）
+
+9. **发版之后还有一步：把本机 profile 的插件升上去，并删掉已经过期的豁免**。
+   `compatibility.json` 里的豁免是 `"<包>@<版本>"` 精确匹配，新版装上去后旧条目就是死数据，
+   应直接删掉该文件并断言 `dsh plugin --profile web version-exemptions` 输出 `{}`。
+   升级脚本照 `~/.dsh/profiles/web/upgrade-hooks-0.14.0-20261008.ps1` 的模式写：
+   60s 延迟让当轮对话先送达 → 停 3080 → `pnpm add <包>@X.Y.Z --save-exact` → 删豁免 →
+   启动后三探针（`/api/dsh-web-all/degraded` 为空、`/dsh-hooks/status` 的 `version` 与
+   `hookCount` 都对、启动 stderr 无 `disabling profile plugin`）→ 任一不过就回滚到旧版+旧豁免。
+   它要重启 dsh web（即当前会话所在进程），所以用 `schtasks /create … /run` 脱离当前进程启动。
 
 ## 安全 CI 三件套
 
