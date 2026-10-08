@@ -587,6 +587,19 @@ export function agentStatusContext(agent: AgentLike, status: unknown): HookConte
   }
 }
 
+/**
+ * A `tool/result` message block, covering both host shapes: dsh 0.2 puts the
+ * tool's output blocks directly on the message and keeps the call id on the
+ * message, while 0.1 wrapped them in a single `tool-result` block that carried
+ * its own `toolCallId` and nested `content`.
+ */
+interface ToolResultBlockLike {
+  type?: unknown
+  text?: unknown
+  toolCallId?: unknown
+  content?: readonly { type?: unknown; text?: unknown }[]
+}
+
 /** Classify a session event into a hook context, or undefined when unmapped. */
 export function classifySessionEvent(session: Session, event: SessionEvent): HookContext | undefined {
   switch (event.type) {
@@ -607,17 +620,23 @@ export function classifySessionEvent(session: Session, event: SessionEvent): Hoo
         event.data.arguments,
       )
     case 'tool/result': {
-      // The call id rides the tool-result block (and the tool source), not
-      // the event envelope — resolve it structurally with fallbacks.
-      const block = event.data.message.content[0] as { toolCallId?: unknown } | undefined
-      const source = event.data.message.source as { callId?: unknown } | undefined
-      const callId = block?.toolCallId ?? source?.callId
+      // The call id is not on the event envelope — resolve it structurally with
+      // fallbacks. dsh 0.2 carries it as the message-level `toolCallId` and
+      // stores the tool's output blocks directly on `content`; the pre-0.2
+      // `tool-result` wrapper block (whose own `content` held the output, and
+      // which is what old session logs replay on resume) is still unwrapped.
+      const content = event.data.message.content as unknown as readonly ToolResultBlockLike[]
+      const wrapped = content.find((block) => block?.type === 'tool-result')
+      const callId =
+        (event.data.message as { toolCallId?: unknown }).toolCallId ??
+        wrapped?.toolCallId ??
+        (event.data.message.source as { callId?: unknown } | undefined)?.callId
       return toolResultContext(
         session,
         event.data.turn,
         event.data.step,
         callId,
-        event.data.message.content[0],
+        { content: wrapped?.content ?? content },
         event.data.error,
       )
     }
