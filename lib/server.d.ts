@@ -27,6 +27,17 @@ export interface WebServerLike {
 export declare function pluginVersion(): string;
 /** DSH_HOOKS_ALLOWED_IPS: unset/empty = loopback; * = any; otherwise comma-separated IPs. */
 export declare function isLoopbackRequest(req: IncomingMessage): boolean;
+/**
+ * Host/Origin fence against DNS rebinding.
+ *
+ * The peer-IP check cannot see rebinding: a page on `evil.example` that the
+ * browser resolves to 127.0.0.1 reaches us from loopback while the browser
+ * treats it as same-origin — no preflight, and the response is readable. Both
+ * `Host` and `Origin` still carry the attacker's hostname, so validating them
+ * closes the hole. Set `DSH_HOOKS_ALLOWED_HOSTS` when a tunnel/proxy is in
+ * front of the GUI (its forwarded hostname is not loopback).
+ */
+export declare function isTrustedHostRequest(req: IncomingMessage): boolean;
 export interface FeishuRouteDeps {
     /** QR-scan session manager (one in-flight flow at a time). */
     manager: FeishuSetupManager;

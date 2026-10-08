@@ -15,6 +15,7 @@ import { join } from 'node:path'
 import YAML from 'yaml'
 import type { registerApp } from '@larksuiteoapi/node-sdk'
 import { run as notifyRun } from '../examples/notify-feishu.mjs'
+import { profilePatchFile } from './profile-path.js'
 
 /** Feishu config dir: credentials + the stable copy of the notify script. */
 export const FEISHU_CONFIG_DIR = join(homedir(), '.dsh', 'dsh-hooks')
@@ -63,9 +64,15 @@ export interface FeishuSetupResult {
   ownerOpenId: string
 }
 
-/** Profile patch file for a profile name. */
+/**
+ * Profile patch file for a profile name.
+ *
+ * Validates the name and contains the path under `~/.dsh/profiles` — the Feishu
+ * setup writes the profile's hook list, so an unchecked name here would be a
+ * second traversal route beside `patchFilePath`.
+ */
 export function patchPath(profile: string): string {
-  return join(homedir(), '.dsh', 'profiles', profile, 'cordis.patch.yml')
+  return profilePatchFile(profile)
 }
 
 /** Which hooks the setup installs into the profile. */

@@ -40,7 +40,13 @@ export interface FeishuSetupResult {
     appId: string;
     ownerOpenId: string;
 }
-/** Profile patch file for a profile name. */
+/**
+ * Profile patch file for a profile name.
+ *
+ * Validates the name and contains the path under `~/.dsh/profiles` — the Feishu
+ * setup writes the profile's hook list, so an unchecked name here would be a
+ * second traversal route beside `patchFilePath`.
+ */
 export declare function patchPath(profile: string): string;
 /** Which hooks the setup installs into the profile. */
 export declare function setupHooks(scriptPath: string): ({

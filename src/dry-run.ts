@@ -4,20 +4,25 @@
  * actually runs the matching hooks, for end-to-end verification.
  */
 import { existsSync, readFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 import YAML from 'yaml'
 import { Config, type HookSpec, type TurnEndReasonKind } from './config.js'
 import { matchFilters } from './events.js'
 import type { HookContext } from './context.js'
 import { DEFAULT_HISTORY_PATH } from './history.js'
+import { profilePatchFile } from './profile-path.js'
 import { localDayKey } from './usage.js'
 import { createHookRunner } from './runner.js'
 import { fireNotify } from './notify.js'
 
-/** Profile patch file for a profile name. */
+/**
+ * Profile patch file for a profile name.
+ *
+ * Validates the name and keeps the resolved path inside `~/.dsh/profiles`
+ * (see {@link profilePatchFile}); an invalid name throws rather than escaping
+ * the profiles root.
+ */
 export function patchFilePath(profile: string): string {
-  return join(homedir(), '.dsh', 'profiles', profile, 'cordis.patch.yml')
+  return profilePatchFile(profile)
 }
 
 /**

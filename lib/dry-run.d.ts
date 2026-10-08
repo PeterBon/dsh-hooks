@@ -1,6 +1,12 @@
 import { type HookSpec, type TurnEndReasonKind } from './config.js';
 import type { HookContext } from './context.js';
-/** Profile patch file for a profile name. */
+/**
+ * Profile patch file for a profile name.
+ *
+ * Validates the name and keeps the resolved path inside `~/.dsh/profiles`
+ * (see {@link profilePatchFile}); an invalid name throws rather than escaping
+ * the profiles root.
+ */
 export declare function patchFilePath(profile: string): string;
 /**
  * Load and normalize the dsh-hooks config block from a profile's

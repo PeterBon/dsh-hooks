@@ -356,7 +356,7 @@ web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 `/ds
 | `/dsh-hooks/feishu/test` | POST | 用已存凭据发送测试卡片 |
 | `/dsh-hooks/feishu/disconnect` | POST | 断开连接：删除凭据文件，`removeHooks: true` 时一并移除 patch 中引用 notify-feishu.mjs 的 hooks（带备份） |
 
-所有访问模式下，POST 仍必须使用 `application/json`（防跨站表单 CSRF）。同时 web profile 下会向 agent 注入一段 systemPrompt 公告，说明插件存在与协作方式。
+所有访问模式下，POST 仍必须使用 `application/json`（防跨站表单 CSRF），且每个请求的 `Host`/`Origin` 主机名都要可信（见下方 [Host / Origin 限制](#配置-host--origin-限制防-dns-rebinding)）。同时 web profile 下会向 agent 注入一段 systemPrompt 公告，说明插件存在与协作方式。
 
 ### 配置 HTTP 来源 IP 限制
 
@@ -371,6 +371,25 @@ web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 `/ds
 变量值首尾空白会被去除。`local`、`all` 不是特殊值；除空值和单独的 `*` 外，其他值都作为 IP 列表匹配。白名单模式**不会额外放行本地连接**，如需保留本地访问，请显式加入 `127.0.0.1,::1`。
 
 匹配时会忽略每项首尾空白、字母大小写及 `::ffff:` 前缀，例如 `192.168.1.100` 可以匹配 `::ffff:192.168.1.100`。不支持域名、端口、CIDR 网段或列表内通配符；无效条目不会自动回退到仅本地或不限制模式。IPv6 采用上述规则处理后的字符串比较，不会统一展开/压缩写法，请使用与服务端所见地址一致的写法。
+
+#### 配置 Host / Origin 限制（防 DNS rebinding）
+
+`DSH_HOOKS_ALLOWED_IPS` 只看 TCP 对端地址，挡不住 DNS rebinding：恶意页面把某个域名解析到 `127.0.0.1` 后，浏览器按「同源」发请求，对端确实是本地地址。因此 `/dsh-hooks/*` 还会校验 `Host`（以及存在时的 `Origin`）主机名，不通过一律 403：
+
+| 情况 | 行为 |
+| --- | --- |
+| `Host` 是 `localhost` / `127.0.0.1` / `[::1]`（可带端口） | 放行 |
+| `Host` 是其他主机名 | 拒绝，除非列在 `DSH_HOOKS_ALLOWED_HOSTS` 中 |
+| 请求没有 `Host` 头 | 放行 —— 浏览器一定会带 `Host`，缺失只出现在本机的非浏览器调用 |
+| `Origin` 存在且其主机名不被信任 | 拒绝 |
+
+**经隧道 / 反向代理访问时**（例如 `https://dsh.peterbon.top`）代理是从本地回环连进来的，但会转发公网主机名，所以要在 `dsh web` 的进程环境里额外设置 `DSH_HOOKS_ALLOWED_HOSTS`，否则面板会被 403：
+
+| 环境变量值 | 行为 |
+| --- | --- |
+| 未设置、空字符串 | 只信任回环主机名 |
+| `dsh.peterbon.top` | 额外信任该主机名（逗号分隔可列多个；只比对主机名，不含端口） |
+| `*` | 不做主机名校验（请先确保外部访问控制可靠） |
 
 #### 直接启动
 

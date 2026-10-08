@@ -14,6 +14,7 @@ import { createRequire } from 'node:module'
 import type { HookSpec } from './config.js'
 import type { HistorySink } from './history.js'
 import { applyMockFields, describeHook, evaluateHooks, MOCK_NUMERIC_FIELDS, mockContext, patchFilePath } from './dry-run.js'
+import { isProfileNameValid } from './profile-path.js'
 import { createHookRunner, type HookRunner } from './runner.js'
 import { fireNotify, summarizeContext } from './notify.js'
 import type { HookContext } from './context.js'
@@ -66,6 +67,67 @@ export function isLoopbackRequest(req: IncomingMessage): boolean {
     return address !== '' && allowedIps.split(',').some((ip) => normalize(ip) === normalize(address))
   }
   return address === '127.0.0.1' || address === '::1' || address === '::ffff:127.0.0.1'
+}
+
+/** Loopback hostnames a browser may legitimately use to reach this server. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]'])
+
+/**
+ * Extra accepted hostnames from `DSH_HOOKS_ALLOWED_HOSTS` (comma-separated,
+ * hostnames without port, `*` = any). Needed when the GUI is reached through a
+ * tunnel or reverse proxy: the proxy connects from loopback but forwards the
+ * public hostname in `Host`, which the loopback allowlist alone would reject.
+ */
+function allowedHostnames(): string[] {
+  return (process.env.DSH_HOOKS_ALLOWED_HOSTS ?? '')
+    .split(',')
+    .map((entry) => entry.trim().toLowerCase())
+    .filter((entry) => entry !== '')
+}
+
+/** Hostname of an authority (`host:port`, `[::1]:port`, `host`). */
+function hostnameOf(authority: string): string {
+  const trimmed = authority.trim().toLowerCase()
+  if (trimmed.startsWith('[')) {
+    const end = trimmed.indexOf(']')
+    return end === -1 ? trimmed : trimmed.slice(0, end + 1)
+  }
+  const colon = trimmed.lastIndexOf(':')
+  return colon === -1 ? trimmed : trimmed.slice(0, colon)
+}
+
+/** Whether one `Host`/`Origin` authority is loopback or explicitly allowed. */
+function isTrustedAuthority(authority: string | undefined): boolean {
+  // A missing Host is allowed: every browser sends one, so an absent value only
+  // comes from a non-browser caller that is already on this machine (and the
+  // peer-IP fence above already decided that case).
+  if (authority === undefined || authority.trim() === '') return true
+  const extra = allowedHostnames()
+  if (extra.includes('*')) return true
+  const host = hostnameOf(authority)
+  return LOOPBACK_HOSTS.has(host) || extra.includes(host)
+}
+
+/**
+ * Host/Origin fence against DNS rebinding.
+ *
+ * The peer-IP check cannot see rebinding: a page on `evil.example` that the
+ * browser resolves to 127.0.0.1 reaches us from loopback while the browser
+ * treats it as same-origin — no preflight, and the response is readable. Both
+ * `Host` and `Origin` still carry the attacker's hostname, so validating them
+ * closes the hole. Set `DSH_HOOKS_ALLOWED_HOSTS` when a tunnel/proxy is in
+ * front of the GUI (its forwarded hostname is not loopback).
+ */
+export function isTrustedHostRequest(req: IncomingMessage): boolean {
+  const host = req.headers.host
+  if (!isTrustedAuthority(typeof host === 'string' ? host : undefined)) return false
+  const origin = req.headers.origin
+  if (typeof origin !== 'string' || origin === '') return true
+  try {
+    return isTrustedAuthority(new URL(origin).host)
+  } catch {
+    return false
+  }
 }
 
 async function readJsonBody(req: IncomingMessage): Promise<unknown> {
@@ -148,9 +210,19 @@ export function describeHooks(hooks: readonly HookSpec[]) {
 
 const FAILED_OUTCOMES = new Set(['exit-nonzero', 'timeout', 'spawn-failed', 'send-failed'])
 
+/**
+ * Reject a `profile` that is not a single safe path segment, so a request body
+ * can never steer a patch-file write outside `~/.dsh/profiles` (see
+ * `profile-path.ts`). Returns true when the response has been sent.
+ */
+function rejectBadProfile(res: ServerResponse, profile: string): boolean {
+  if (isProfileNameValid(profile)) return false
+  json(res, FAIL('bad-request', `非法 profile 名称：${profile}`), 400)
+  return true
+}
+
 /** Create the /dsh-hooks route handler (exported for tests). */
-export function createHookHandler(options: HookRoutesOptions) {
-  const { hooks, history } = options
+export function createHookHandler(options: HookRoutesOptions) {  const { hooks, history } = options
   const version = options.version ?? pluginVersion()
   const feishu = options.feishu
   const runFeishuTestCard = feishu?.runTest ?? runFeishuTest
@@ -161,6 +233,10 @@ export function createHookHandler(options: HookRoutesOptions) {
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (!isLoopbackRequest(req)) {
       json(res, FAIL('forbidden', 'IP not allowed'), 403)
+      return
+    }
+    if (!isTrustedHostRequest(req)) {
+      json(res, FAIL('forbidden', 'untrusted Host/Origin'), 403)
       return
     }
     const url = new URL(req.url ?? '/', 'http://x')
@@ -296,6 +372,7 @@ export function createHookHandler(options: HookRoutesOptions) {
       }
       const body = payload as Record<string, unknown>
       const profile = typeof body.profile === 'string' && body.profile.trim() !== '' ? body.profile.trim() : 'web'
+      if (rejectBadProfile(res, profile)) return
       const resultMaxChars = typeof body.resultMaxChars === 'number' && Number.isFinite(body.resultMaxChars)
         ? body.resultMaxChars
         : undefined
@@ -413,6 +490,7 @@ export function createHookHandler(options: HookRoutesOptions) {
       }
       const body = payload as Record<string, unknown>
       const profile = typeof body.profile === 'string' && body.profile.trim() !== '' ? body.profile.trim() : 'web'
+      if (rejectBadProfile(res, profile)) return
       const wireHooks = body.hooks
       if (!Array.isArray(wireHooks)) {
         json(res, FAIL('bad-request', '缺少数组字段 hooks'), 400)
@@ -446,6 +524,7 @@ export function createHookHandler(options: HookRoutesOptions) {
       const payload = await readJsonBody(req)
       const body = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>
       const profile = typeof body.profile === 'string' && body.profile.trim() !== '' ? body.profile.trim() : 'web'
+      if (rejectBadProfile(res, profile)) return
       const removeHooks = body.removeHooks === true
       // Abort any in-flight scan session first.
       feishu.manager.cancel()
