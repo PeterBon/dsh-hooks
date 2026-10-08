@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -144,5 +144,59 @@ describe('disk seeding and sync', () => {
     expect(sink.recent()).toEqual([])
     sink.sync()
     expect(sink.recent()).toEqual([])
+  })
+})
+
+describe('disk retention', () => {
+  const line = (event: string, ts: number) => JSON.stringify({ ...sample, event, ts }) + '\n'
+
+  it('seeds only the newest tail of a large log', () => {
+    const file = join(tmp, 'history.jsonl')
+    const records: string[] = []
+    for (let i = 0; i < 200; i++) records.push(line(`event-${i}`, i + 1))
+    writeFileSync(file, records.join(''), 'utf8')
+
+    // A small tail window: the seed must read the end of the file, not all of it.
+    const sink = createHistorySink({ path: file, tailBytes: 400 })
+    const events = sink.recent().map((r) => r.event)
+    expect(events.length).toBeGreaterThan(0)
+    expect(events.length).toBeLessThan(200)
+    expect(events.at(-1)).toBe('event-199')
+    // Every seeded record is a complete line (no half-parsed cut).
+    expect(events.every((event) => /^event-\d+$/.test(event))).toBe(true)
+  })
+
+  it('compacts the file once it exceeds the size cap, keeping the newest records', () => {
+    const file = join(tmp, 'history.jsonl')
+    const sink = createHistorySink({ path: file, max: 5, maxBytes: 400, tailBytes: 4000 })
+    for (let i = 0; i < 60; i++) sink.record({ ...sample, event: `event-${i}` })
+
+    const size = statSync(file).size
+    // 60 records are far bigger than the cap; compaction must keep the file small.
+    expect(size).toBeLessThanOrEqual(800)
+    // The newest record survives, and what remains is valid JSONL.
+    expect(sink.recent().at(-1)?.event).toBe('event-59')
+    const kept = readFileSync(file, 'utf8').split('\n').filter((entry) => entry !== '')
+    expect(kept.length).toBeGreaterThan(0)
+    for (const entry of kept) expect(() => JSON.parse(entry)).not.toThrow()
+    expect(JSON.parse(kept[kept.length - 1] as string).event).toBe('event-59')
+  })
+
+  it('does not compact when the cap is disabled', () => {
+    const file = join(tmp, 'history.jsonl')
+    const sink = createHistorySink({ path: file, maxBytes: 0 })
+    for (let i = 0; i < 30; i++) sink.record({ ...sample, event: `event-${i}` })
+    const kept = readFileSync(file, 'utf8').split('\n').filter((entry) => entry !== '')
+    expect(kept).toHaveLength(30)
+  })
+
+  it('creates the log owner-only on POSIX', () => {
+    const file = join(tmp, 'history.jsonl')
+    const sink = createHistorySink({ path: file })
+    sink.record({ ...sample, event: 'first' })
+    if (process.platform !== 'win32') {
+      expect(statSync(file).mode & 0o777).toBe(0o600)
+    }
+    expect(readFileSync(file, 'utf8')).toContain('first')
   })
 })

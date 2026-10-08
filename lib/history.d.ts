@@ -17,6 +17,14 @@ export interface HookRunRecord {
 }
 export declare const DEFAULT_HISTORY_PATH: string;
 export declare const DEFAULT_HISTORY_MAX = 500;
+/**
+ * Compact the JSONL file once it grows past this many bytes. Without a cap the
+ * append-only log grows forever (every trigger writes at least a `spawned` and
+ * a terminal record), and the startup seed has to read all of it.
+ */
+export declare const DEFAULT_HISTORY_MAX_BYTES: number;
+/** Newest bytes read when seeding from (or compacting) a large file. */
+export declare const DEFAULT_HISTORY_TAIL_BYTES: number;
 export interface HistorySinkOptions {
     /** Whether to persist records to disk. Defaults to true. */
     enabled?: boolean;
@@ -24,6 +32,13 @@ export interface HistorySinkOptions {
     path?: string;
     /** In-memory ring buffer size. Defaults to 500. */
     max?: number;
+    /**
+     * Compact the file once it exceeds this size; `0` never compacts.
+     * Defaults to {@link DEFAULT_HISTORY_MAX_BYTES}.
+     */
+    maxBytes?: number;
+    /** Newest bytes read when seeding/compacting. Defaults to {@link DEFAULT_HISTORY_TAIL_BYTES}. */
+    tailBytes?: number;
 }
 export interface HistorySink {
     record(record: Omit<HookRunRecord, 'ts'>): void;
