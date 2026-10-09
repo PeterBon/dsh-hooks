@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, afterEach } from 'vitest'
-import { createHookRunner } from '../src/runner.js'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MAX_RETRY_DELAY_MS, capCaptureText, createHookRunner, retryDelayFor } from '../src/runner.js'
 
 // Mock spawn to avoid real shells in tests.
 vi.mock('node:child_process', () => {
@@ -412,5 +412,67 @@ describe('createHookRunner', () => {
     expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: false, reason: 'spawn-failed' })
     expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: false, reason: 'spawn-failed' })
     expect(spawnMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('clears limiter slots on dispose so a later run is not rejected', () => {
+    const runner = createHookRunner()
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+    const limiter = { id: 'hook:0', max: 1 }
+    const ctx = { event: 'step/end', timestamp: 'T' }
+    const spec = { on: 'step/end', run: 'x' }
+
+    expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: true })
+    // The in-flight run still occupies the only slot.
+    expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: false })
+
+    // dispose kills the child; its `close` never arrives, so without the
+    // teardown reset the slot would stay occupied for the rest of the process.
+    runner.dispose()
+    expect(runner.stats()).toEqual({ inFlight: 0, pendingRetries: 0 })
+    expect(runner.run(spec, ctx, undefined, limiter)).toMatchObject({ ok: true })
+  })
+
+  it('hides the console window on Windows', () => {
+    const runner = createHookRunner()
+    fakeChildRef = fakeChild()
+    spawnMock.mockReturnValue(fakeChildRef as never)
+    runner.run({ on: 'turn/end', run: 'echo hi' }, { event: 'turn/end', timestamp: 'T' })
+    expect(spawnMock).toHaveBeenCalledWith('echo hi', expect.objectContaining({ windowsHide: true }))
+  })
+})
+
+describe('retry backoff', () => {
+  it('doubles per attempt and stops at the ceiling', () => {
+    expect(retryDelayFor(500, 0)).toBe(500)
+    expect(retryDelayFor(500, 1)).toBe(1000)
+    expect(retryDelayFor(500, 3)).toBe(4000)
+    // 500 * 2 ** 10 would be 512 s; the cap keeps a logical run short-lived.
+    expect(retryDelayFor(500, 10)).toBe(MAX_RETRY_DELAY_MS)
+    expect(retryDelayFor(20000, 1)).toBe(MAX_RETRY_DELAY_MS)
+  })
+})
+
+describe('capture cap', () => {
+  it('caps by UTF-8 bytes and never leaves a half-written character', () => {
+    // 40k CJK chars are 120 KB of UTF-8 (and only 40k UTF-16 code units).
+    const text = capCaptureText('汉'.repeat(40000))
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(64 * 1024)
+    expect(text.endsWith('\uFFFD')).toBe(false)
+    // The kept prefix is still intact CJK.
+    expect(text.startsWith('汉汉')).toBe(true)
+    expect(/^汉+$/.test(text)).toBe(true)
+  })
+
+  it('keeps short output untouched', () => {
+    expect(capCaptureText('全部保留')).toBe('全部保留')
+    expect(capCaptureText('汉'.repeat(100), 512)).toBe('汉'.repeat(100))
+  })
+
+  it('caps an emoji run without splitting a surrogate pair', () => {
+    const text = capCaptureText('😀'.repeat(30000))
+    expect(Buffer.byteLength(text, 'utf8')).toBeLessThanOrEqual(64 * 1024)
+    expect(text.endsWith('\uFFFD')).toBe(false)
+    expect(Array.from(text).every((char) => char === '😀')).toBe(true)
   })
 })

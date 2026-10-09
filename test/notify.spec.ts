@@ -194,6 +194,81 @@ describe('sendWebhook', () => {
       vi.useRealTimers()
     }
   })
+
+  it('caps the exponential backoff at the ceiling', async () => {
+    vi.useFakeTimers()
+    try {
+      const logged: string[] = []
+      const fetchMock = vi
+        .fn()
+        .mockRejectedValueOnce(new Error('a'))
+        .mockRejectedValueOnce(new Error('b'))
+        .mockResolvedValueOnce({ ok: true })
+      vi.stubGlobal('fetch', fetchMock)
+      const pending = sendWebhook(
+        { channel: 'webhook', url: 'https://x' },
+        ctx,
+        {},
+        { retries: 2, retryDelayMs: 20000, log: (line) => logged.push(line) },
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      // First retry waits the base delay; the second would double to 40 s and
+      // is clamped to the ceiling, so one logical run stays short-lived.
+      expect(logged[0]).toContain('20000ms 后重试')
+      await vi.advanceTimersByTimeAsync(20000)
+      expect(logged[1]).toContain('30000ms 后重试')
+      await vi.advanceTimersByTimeAsync(30000)
+      expect(await pending).toEqual({ ok: true })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('stops retrying when the plugin unloads', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchMock = vi.fn().mockRejectedValue(new Error('boom'))
+      vi.stubGlobal('fetch', fetchMock)
+      const controller = new AbortController()
+      const pending = sendWebhook(
+        { channel: 'webhook', url: 'https://x' },
+        ctx,
+        {},
+        { retries: 5, retryDelayMs: 100, signal: controller.signal, log: () => {} },
+      )
+      await vi.advanceTimersByTimeAsync(0)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+
+      controller.abort()
+      await vi.advanceTimersByTimeAsync(5000)
+      const result = await pending
+      expect(result).toMatchObject({ ok: false, aborted: true })
+      // The backoff sleep is cut short and no further request is made.
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("honours the hook's timeoutMs for one attempt", async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchMock = vi.fn().mockImplementation((_url: string, init: { signal: AbortSignal }) => {
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener('abort', () => reject(new Error('aborted')), { once: true })
+        })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const pending = sendWebhook({ channel: 'webhook', url: 'https://x' }, ctx, {}, { retries: 0, timeoutMs: 50, log: () => {} })
+      // Only a 50 ms per-attempt timeout settles this; the 10 s default would hang.
+      await vi.advanceTimersByTimeAsync(50)
+      const result = await pending
+      expect(result.ok).toBe(false)
+      expect(result.error).toContain('webhook 请求失败')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('sendDesktop', () => {
@@ -222,6 +297,30 @@ describe('sendDesktop', () => {
     expect(result.ok).toBe(false)
     expect(result.error).toContain('ENOENT')
   })
+
+  it('hides the console window and keeps a timeout as the failure reason', async () => {
+    vi.useFakeTimers()
+    try {
+      const child = fakeChild()
+      spawnMock.mockReturnValue(child as never)
+      const pending = sendDesktop({ channel: 'desktop' }, ctx)
+      // A desktop toast must never flash a console window behind it.
+      expect(spawnMock).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.objectContaining({ windowsHide: true }),
+      )
+      await vi.advanceTimersByTimeAsync(60000)
+      const settled = await pending
+      expect(settled.ok).toBe(false)
+      expect(settled.error).toContain('超时')
+      // The kill makes `close` fire afterwards; it must not rewrite the reason.
+      child.emit('close', null)
+      expect(settled.error).toContain('超时')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
 
 describe('fireNotify', () => {
@@ -231,6 +330,26 @@ describe('fireNotify', () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('down')))
       await fireNotify({ channel: 'webhook', url: 'https://x' }, ctx)
       expect(warnSpy).toHaveBeenCalled()
+    } finally {
+      warnSpy.mockRestore()
+    }
+  })
+
+  it('records an unload-aborted retry as skipped, not as a delivery failure', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const controller = new AbortController()
+      controller.abort()
+      const outcomes: string[] = []
+      const result = await fireNotify(
+        { channel: 'webhook', url: 'https://x' },
+        ctx,
+        (record) => outcomes.push(record.outcome),
+        { retries: 3, signal: controller.signal },
+      )
+      expect(result).toMatchObject({ ok: false, aborted: true })
+      expect(outcomes).toEqual(['skipped'])
+      expect(warnSpy).not.toHaveBeenCalled()
     } finally {
       warnSpy.mockRestore()
     }

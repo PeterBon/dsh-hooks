@@ -9,11 +9,13 @@ import type { HookContext } from './context.js'
 import { eventLabel } from './context.js'
 import type { NotifySpec } from './config.js'
 import type { HookRunRecord } from './history.js'
-import { DEFAULT_RETRY_DELAY_MS } from './runner.js'
+import { DEFAULT_RETRY_DELAY_MS, retryDelayFor } from './runner.js'
 
 export interface NotifyResult {
   ok: boolean
   error?: string
+  /** True when the plugin was torn down mid-retry: not a delivery failure. */
+  aborted?: boolean
 }
 
 export type NotifyRecord = (record: Omit<HookRunRecord, 'ts'>) => void
@@ -25,13 +27,21 @@ export type NotifyRecord = (record: Omit<HookRunRecord, 'ts'>) => void
 export interface NotifyRetryOptions {
   /** Retries after the first attempt. Defaults to 0 (one attempt, never retried). */
   retries?: number
-  /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
+  /** Base delay between retries in milliseconds; doubles per attempt, capped. Defaults to 500. */
   retryDelayMs?: number
+  /**
+   * Per-attempt webhook timeout (ms); the hook's `timeoutMs`, defaulting to
+   * {@link NOTIFY_TIMEOUT_MS}. Per attempt — `retries` multiplies the worst
+   * case, which is why the backoff is capped.
+   */
+  timeoutMs?: number
+  /** Aborts the retry loop (and any in-flight request) when the plugin unloads. */
+  signal?: AbortSignal
   /** Retry progress lines (defaults to `console.warn`). */
   log?: (line: string) => void
 }
 
-/** Fetch timeout for webhook sends (ms). */
+/** Default fetch timeout for one webhook attempt (ms). */
 export const NOTIFY_TIMEOUT_MS = 10000
 
 /**
@@ -44,11 +54,25 @@ export function isRetryableStatus(status: number): boolean {
   return status === 408 || status === 429 || status >= 500
 }
 
-/** Sleep without holding the event loop open (retries never outlive the plugin). */
-function sleep(ms: number): Promise<void> {
+/**
+ * Sleep without holding the event loop open, and without outliving the plugin:
+ * an abort (teardown) resolves immediately so the retry loop stops.
+ */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve) => {
-    const timer = setTimeout(resolve, ms)
+    if (signal?.aborted === true) {
+      resolve()
+      return
+    }
+    const done = (): void => {
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }
+    const onAbort = (): void => done()
+    const timer = setTimeout(done, ms)
     timer.unref?.()
+    signal?.addEventListener('abort', onAbort, { once: true })
   })
 }
 
@@ -132,10 +156,19 @@ export async function sendWebhook(
   const body = spec.slack ? { text: summarizeContext(ctx) } : webhookPayload(ctx)
   const retries = Math.max(0, retry.retries ?? 0)
   const baseDelay = Math.max(0, retry.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
+  const timeoutMs = retry.timeoutMs !== undefined && retry.timeoutMs > 0 ? retry.timeoutMs : NOTIFY_TIMEOUT_MS
+  const signal = retry.signal
   const log = retry.log ?? ((line: string) => console.warn(line))
+  // Read through a call: TypeScript narrows `signal.aborted` after the first
+  // check and keeps that narrowing across `await`, which would flag the later
+  // checks as dead comparisons.
+  const aborted = (): boolean => signal?.aborted === true
   const attempt = async (): Promise<Response> => {
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), NOTIFY_TIMEOUT_MS)
+    const onExternalAbort = (): void => controller.abort()
+    if (aborted()) controller.abort()
+    else signal?.addEventListener('abort', onExternalAbort, { once: true })
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       return await fetch(url, {
         method: 'POST',
@@ -145,11 +178,15 @@ export async function sendWebhook(
       })
     } finally {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onExternalAbort)
     }
   }
   // Attempt loop: `retries` counts the attempts AFTER the first one, so the
   // total is `1 + retries` — identical to the run channel's semantics.
   for (let attemptNumber = 0; ; attemptNumber++) {
+    if (aborted()) {
+      return { ok: false, aborted: true, error: '插件已卸载，通知重试已中止' }
+    }
     let failure: string
     let retryable: boolean
     try {
@@ -158,6 +195,11 @@ export async function sendWebhook(
       failure = `webhook 响应 HTTP ${response.status}`
       retryable = isRetryableStatus(response.status)
     } catch (error) {
+      // An abort here is either the per-attempt timeout (retryable) or the
+      // plugin unloading (terminal — stop, do not report a delivery failure).
+      if (aborted()) {
+        return { ok: false, aborted: true, error: '插件已卸载，通知重试已中止' }
+      }
       failure = `webhook 请求失败: ${error instanceof Error ? error.message : String(error)}`
       // Transport failures are always worth another attempt.
       retryable = true
@@ -166,9 +208,9 @@ export async function sendWebhook(
     if (!retryable || attempts > retries) {
       return { ok: false, error: attempts > 1 ? `${failure}（${attempts} 次尝试后仍失败）` : failure }
     }
-    const delay = baseDelay * 2 ** attemptNumber
+    const delay = retryDelayFor(baseDelay, attemptNumber)
     log(`[dsh-hooks] 通知发送失败（${failure}），${delay}ms 后重试（${attempts}/${retries}）：${eventLabel(ctx)}`)
-    await sleep(delay)
+    await sleep(delay, signal)
   }
 }
 
@@ -211,23 +253,29 @@ function runAndWait(argv: string[], env: Record<string, string>, timeoutMs: numb
   return new Promise((resolve, reject) => {
     let child: ReturnType<typeof spawn>
     try {
-      child = spawn(argv[0], argv.slice(1), { stdio: 'ignore', env: { ...process.env, ...env } })
+      // windowsHide: a desktop toast must not flash a console window behind it.
+      child = spawn(argv[0], argv.slice(1), { stdio: 'ignore', env: { ...process.env, ...env }, windowsHide: true })
     } catch (error) {
       reject(error instanceof Error ? error : new Error(String(error)))
       return
     }
+    let settled = false
+    const settle = (fn: () => void): void => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      fn()
+    }
     const timer = setTimeout(() => {
       child.kill()
-      reject(new Error(`命令超时（${timeoutMs}ms）`))
+      settle(() => reject(new Error(`命令超时（${timeoutMs}ms）`)))
     }, timeoutMs)
-    child.on('error', (error) => {
-      clearTimeout(timer)
-      reject(error)
-    })
+    child.on('error', (error) => settle(() => reject(error)))
     child.on('close', (code) => {
-      clearTimeout(timer)
-      if (code === 0) resolve()
-      else reject(new Error(`退出码 ${code}`))
+      // After a timeout the kill makes `close` fire again: never double-settle,
+      // and keep the timeout as the reported reason.
+      if (code === 0) settle(resolve)
+      else settle(() => reject(new Error(`退出码 ${code}`)))
     })
   })
 }
@@ -245,6 +293,21 @@ export async function fireNotify(
 ): Promise<NotifyResult> {
   const startedAt = Date.now()
   const result = spec.channel === 'webhook' ? await sendWebhook(spec, ctx, process.env, retry) : await sendDesktop(spec, ctx)
+  if (result.aborted === true) {
+    // Teardown, not a delivery failure: history records it as skipped and no
+    // failure warning is logged (an unload is not the endpoint's fault).
+    record?.({
+      kind: 'notify',
+      event: ctx.event,
+      command: `notify:${spec.channel}`,
+      sessionId: ctx.sessionId,
+      sessionName: ctx.sessionName,
+      outcome: 'skipped',
+      durationMs: Date.now() - startedAt,
+      error: result.error,
+    })
+    return result
+  }
   if (!result.ok) {
     console.warn(`[dsh-hooks] 通知发送失败 (${eventLabel(ctx)}): ${result.error}`)
     record?.({

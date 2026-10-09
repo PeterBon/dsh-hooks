@@ -78,9 +78,9 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `run` | 通过系统 shell 执行的命令（与 `notify` 二选一） | 二选一必填 |
 | `notify` | 内置通知（与 `run` 二选一）：`channel: webhook`（HTTP JSON，`url` 可省略用 `DSH_HOOKS_WEBHOOK_URL`，`slack: true` 换单行摘要）或 `channel: desktop`（系统气泡/toast） | 二选一必填 |
 | `input` | `env` 只传 `DSH_HOOK_*` 环境变量；`stdin` 额外把完整上下文 JSON 写入命令标准输入 | `env` |
-| `timeoutMs` | 单次执行超时（毫秒），超时终止进程树 | 10000 |
+| `timeoutMs` | 单次执行超时（毫秒），超时终止进程树；notify 的 webhook 通道用它作为**单次请求**超时（默认 10000），桌面通道是本地气泡（脚本本身要显示约 9 秒）故不适用 | 10000 |
 | `retries` | 非零退出码的重试次数（spawn 失败与超时不重试） | 0 |
-| `retryDelayMs` | 重试基础间隔（毫秒），每次翻倍 | 500 |
+| `retryDelayMs` | 重试基础间隔（毫秒），每次翻倍、**上限 30 秒** | 500 |
 | `enabled` | `false` 停用该 hook：配置保留、静默跳过派发（不计入失败） | `true` |
 | `cwd` | 命令执行目录：`session` 在会话工作目录执行；绝对路径在指定目录执行（只作用于 `run`） | 插件进程目录 |
 | `maxConcurrent` | 该 hook 允许的最大并发进程数；超出的触发被丢弃（执行历史记 `skipped`） | 不限 |
@@ -114,7 +114,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 ## 命令执行
 
 - 每个命中的 hook 通过系统 shell 执行 `run`，**fire-and-forget**：失败只 `console.warn`、默认不重试、绝不阻塞 agent 循环。命令的 stdout/stderr 会被捕获（各 64 KiB 上限），非零退出码时把 stderr 尾部写进告警日志。
-- **重试**（`retries` / `retryDelayMs`）对两个执行通道都生效，都是「首次尝试之后再重试 N 次」、间隔按 `retryDelayMs` 逐次翻倍（默认 500ms）：
+- **重试**（`retries` / `retryDelayMs`）对两个执行通道都生效，都是「首次尝试之后再重试 N 次」、间隔按 `retryDelayMs` 逐次翻倍（默认 500ms，**上限 30 秒**，避免一次触发在退避里挂几分钟）；**插件卸载（重启/重载 profile）会立即中止进行中的重试**（含退避等待与在途请求），历史里记为 `skipped` 而不是失败：
   - `run`：只重试**非零退出码**（spawn 失败与超时不重试）。
   - `notify` 的 webhook 渠道：重试**传输失败**（连接被重置、超时）与 HTTP **408 / 429 / 5xx**；其余 4xx 表示请求本身有问题，不重试。**默认 `retries: 0` 表示只尝试一次**——0.13 之前 webhook 曾硬编码「传输失败自动再试一次」，现在这层兜底已并入 `retries`，需要它的老配置请显式写 `retries: 1`。
   - `notify` 的 desktop 渠道是本地弹窗，不重试。

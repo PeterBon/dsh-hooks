@@ -39,14 +39,41 @@ export interface RunLimiter {
 
 export const DEFAULT_TIMEOUT_MS = 10000
 export const DEFAULT_RETRY_DELAY_MS = 500
+/**
+ * Ceiling for the exponential retry backoff. Without it `retryDelayMs * 2 ** n`
+ * grows into minutes (`retries: 10` at the 500 ms default waits ~256 s for its
+ * last attempt), which keeps a logical run — and its `maxConcurrent` slot —
+ * alive long after the triggering event and makes the history timeline
+ * unreadable.
+ */
+export const MAX_RETRY_DELAY_MS = 30_000
+
+/** Backoff before one retry attempt: base doubling, capped at {@link MAX_RETRY_DELAY_MS}. */
+export function retryDelayFor(baseDelayMs: number, attempt: number): number {
+  return Math.min(baseDelayMs * 2 ** attempt, MAX_RETRY_DELAY_MS)
+}
 
 /**
- * Per-stream capture cap. The hook's stdout/stderr is only kept for
- * failure diagnostics, so anything past 64 KiB is drained and dropped
- * (reading must never stop — a stopped reader would fill the pipe buffer
- * and wedge the hook process).
+ * Per-stream capture cap, in bytes. The hook's stdout/stderr is only kept for
+ * failure diagnostics, so anything past 64 KiB is dropped (reading must never
+ * stop — a stopped reader would fill the pipe buffer and wedge the hook).
+ * Measured in real UTF-8 bytes, not UTF-16 code units: 64 Ki code units of CJK
+ * would be ~192 KiB of text.
  */
 const MAX_CAPTURE_BYTES = 64 * 1024
+
+/**
+ * Trim captured stdout/stderr to `maxBytes` of real UTF-8 text, cutting on a
+ * character boundary (a half-written multi-byte sequence would otherwise show
+ * up as U+FFFD in the failure diagnostic). Exported for tests.
+ */
+export function capCaptureText(text: string, maxBytes: number = MAX_CAPTURE_BYTES): string {
+  if (Buffer.byteLength(text, 'utf8') <= maxBytes) return text
+  return Buffer.from(text, 'utf8')
+    .subarray(0, maxBytes)
+    .toString('utf8')
+    .replace(/\uFFFD$/, '')
+}
 
 /**
  * Terminate a spawned hook process. With `shell: true` on Windows the direct
@@ -134,6 +161,8 @@ export function createHookRunner(log: (line: string) => void = console.log, reco
         cwd: resolveCwd(spec, ctx),
         env: { ...process.env, ...env },
         stdio: [useStdin ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+        // Hooks are headless: never flash a console window on Windows.
+        windowsHide: true,
       })
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error)
@@ -166,9 +195,7 @@ export function createHookRunner(log: (line: string) => void = console.log, reco
 
     const captured = { out: '', err: '' }
     const capture = (target: 'out' | 'err') => (chunk: Buffer | string) => {
-      const text = String(chunk)
-      const room = MAX_CAPTURE_BYTES - captured[target].length
-      if (room > 0) captured[target] += text.slice(0, room)
+      captured[target] = capCaptureText(captured[target] + String(chunk))
     }
     child.stdout?.on('data', capture('out'))
     child.stderr?.on('data', capture('err'))
@@ -189,7 +216,7 @@ export function createHookRunner(log: (line: string) => void = console.log, reco
         return
       }
       if (attempt < retries) {
-        const delay = retryDelayMs * 2 ** attempt
+        const delay = retryDelayFor(retryDelayMs, attempt)
         log(`[dsh-hooks] hook 退出码 ${code}，${delay}ms 后重试（${attempt + 1}/${retries}）：${eventLabel(ctx)}`)
         const retryTimer = setTimeout(() => {
           pendingRetries.delete(retryTimer)
@@ -228,6 +255,10 @@ export function createHookRunner(log: (line: string) => void = console.log, reco
     pendingRetries.clear()
     for (const child of children) terminate(child)
     children.clear()
+    // Killed children never reach their `close` handler, so their limiter
+    // slots would stay occupied (and `stats()` would disagree with the empty
+    // process set). Teardown is final: drop the counts with the processes.
+    inFlightById.clear()
   }
 
   function stats(): HookRunnerStats {

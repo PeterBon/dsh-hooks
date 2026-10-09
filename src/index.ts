@@ -139,6 +139,12 @@ export function apply(ctx: Context, config: Config = {}) {
   const hooks: readonly HookSpec[] = config.hooks ?? []
   const history: HistorySink = createHistorySink(config.history ?? undefined)
   const runner = createHookRunner((line) => ctx.logger?.info(line), (record) => history.record(record))
+  /**
+   * Teardown signal for the notify channels: a webhook retry loop (with its
+   * backoff sleeps and in-flight request) must stop when the plugin unloads
+   * instead of POSTing for minutes after the profile is gone.
+   */
+  const notifyAbort = new AbortController()
 
   // Web-profile extras: /dsh-hooks routes (incl. the Feishu connect flow)
   // and the agent announcement. Both services are optional — CLI/headless
@@ -247,10 +253,14 @@ export function apply(ctx: Context, config: Config = {}) {
     }
     if (hook.notify) {
       // Retries ride the same per-hook options as `run` (webhook channel only;
-      // the desktop channel is a local spawn and never retries).
+      // the desktop channel is a local spawn and never retries). `timeoutMs`
+      // bounds one webhook attempt, and the signal stops the retry loop when
+      // the plugin unloads instead of letting it outlive the profile.
       void fireNotify(hook.notify, ctxValue, track, {
         retries: hook.retries,
         retryDelayMs: hook.retryDelayMs,
+        timeoutMs: hook.timeoutMs,
+        signal: notifyAbort.signal,
       })
       return
     }
@@ -514,6 +524,8 @@ export function apply(ctx: Context, config: Config = {}) {
     pendingTurnStarts.clear()
     watchedTrees.clear()
     usageDays.reset()
+    // Stop in-flight webhook retries (and their backoff sleeps).
+    notifyAbort.abort()
   })
 }
 
