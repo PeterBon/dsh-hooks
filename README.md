@@ -78,9 +78,9 @@ Every hook field:
 | `run` | command spawned through the platform shell (exactly one of `run` / `notify`) | one of the two required |
 | `notify` | built-in notification (exactly one of `run` / `notify`): `channel: webhook` (HTTP JSON; omit `url` to use `DSH_HOOKS_WEBHOOK_URL`, `slack: true` for a one-line summary) or `channel: desktop` (platform balloon/toast) | one of the two required |
 | `input` | `env` passes only the `DSH_HOOK_*` variables; `stdin` additionally writes the full context JSON to the command's stdin | `env` |
-| `timeoutMs` | per-run timeout (ms); the process tree is terminated on expiry | 10000 |
+| `timeoutMs` | per-run timeout (ms); the process tree is terminated on expiry. On the notify webhook channel it bounds **one request** (default 10000); the desktop channel is a local balloon whose script intentionally lives ~9 s, so it does not apply there | 10000 |
 | `retries` | retry count for non-zero exit codes (spawn failures and timeouts never retry) | 0 |
-| `retryDelayMs` | base delay between retries (ms), doubles per attempt | 500 |
+| `retryDelayMs` | base delay between retries (ms), doubles per attempt, **capped at 30 s** | 500 |
 | `enabled` | `false` disables the hook without deleting it: the declaration stays, dispatch skips it silently (never counts as a failure) | `true` |
 | `cwd` | working directory for the spawned command: `session` runs in the session's cwd, an absolute path runs there (`run` only) | plugin process directory |
 | `maxConcurrent` | max concurrently running processes for this hook; triggers beyond the cap are dropped (recorded as `skipped`) | unlimited |
@@ -114,7 +114,7 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 ## Command execution
 
 - Each matching hook spawns `run` through the platform shell, **fire-and-forget**: failures only `console.warn`, never retried by default, never block the agent loop. Command stdout/stderr is captured (64 KiB per stream); on a non-zero exit the stderr tail is appended to the warning log.
-- **Retries** (`retries` / `retryDelayMs`) apply to both execution channels with the same shape: up to `retries` extra attempts after the first one, with the delay doubling per attempt (`retryDelayMs`, default 500 ms):
+- **Retries** (`retries` / `retryDelayMs`) apply to both execution channels with the same shape: up to `retries` extra attempts after the first one, with the delay doubling per attempt (`retryDelayMs`, default 500 ms, **capped at 30 s** so one trigger cannot sit in backoff for minutes). **Unloading the plugin (restart / profile reload) aborts an in-flight retry immediately** — backoff sleeps and the pending request included — and records it as `skipped` rather than a failure:
   - `run`: retries **non-zero exit codes** only (spawn failures and timeouts are never retried).
   - `notify` webhook channel: retries **transport failures** (connection reset, timeout) and HTTP **408 / 429 / 5xx**; other 4xx mean the request itself is wrong and are not retried. The default `retries: 0` now means exactly one attempt — before 0.13 the webhook channel hard-coded a single transport retry, which is now folded into `retries`: existing configs that relied on it should set `retries: 1`.
   - `notify` desktop channel is a local popup and never retries.
@@ -133,6 +133,7 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_CALL_ID` | tool call id (approval / tool events) |
 | `DSH_HOOK_TOOL_ARGS` | raw tool arguments JSON (tool/call) |
 | `DSH_HOOK_TOOL_ERROR` | tool failure identity `name: code` (tool/result errors) |
+| `DSH_HOOK_TOOL_ERROR_REASON` | human-readable reason the host reports beside that identity (when a failed tool/result carries `reason`) |
 | `DSH_HOOK_TOOL_DURATION_MS` | wall-clock tool execution ms (tool/result; absent when the pairing tool/call was never seen) |
 | `DSH_HOOK_SOURCE` | message / title source kind (`user`, `plugin`, `fallback`, `provider`, …) |
 | `DSH_HOOK_DURATION_MS` | turn duration ms (turn/end) |
@@ -231,7 +232,7 @@ Rules:
 
 - Comparison semantics apply only to **numeric** fields; on a string field a comparison **never matches** (no string coercion).
 - A string value counts as a comparison only when it starts with `>` / `>=` / `<` / `<=` / `=` followed by a number (e.g. `'>10000'`); anything else stays a plain regex.
-- A missing field still never matches. An empty object `{}` matches vacuously.
+- A missing field still never matches. An empty object `{}` **never matches** — it declares no condition at all, and failing closed beats a typo'd filter silently matching every event.
 
 ### Execution options: enabled / cwd / maxConcurrent / debounceMs
 

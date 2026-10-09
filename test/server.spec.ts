@@ -198,6 +198,21 @@ describe('createHookHandler', () => {
     expect(readJson(res).statusCode).toBe(415)
   })
 
+  it('matches the media type exactly and still allows parameters', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
+    // A prefix test used to let `application/jsonp` through the CSRF guard.
+    const prefixed = fakeRes()
+    await handler(bodyReq('/dsh-hooks/test', { event: 'turn/end' }, { 'content-type': 'application/jsonp' }), prefixed)
+    expect(readJson(prefixed).statusCode).toBe(415)
+
+    const withParams = fakeRes()
+    await handler(
+      bodyReq('/dsh-hooks/test', { event: 'turn/end' }, { 'content-type': 'application/json; charset=utf-8' }),
+      withParams,
+    )
+    expect(readJson(withParams).statusCode).toBe(200)
+  })
+
   it('rejects malformed test bodies', async () => {
     const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
     const res = fakeRes()
@@ -747,5 +762,21 @@ describe('Host/Origin fence (DNS rebinding)', () => {
     await withAllowedHosts(undefined, async () => {
       expect((await status({})).statusCode).toBe(200)
     })
+  })
+})
+
+describe('request body cap', () => {
+  it('answers 413 rather than "malformed JSON" for an oversized body', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
+    const res = fakeRes()
+    // One chunk past the 1 MiB cap: the old code returned "malformed JSON body"
+    // (400), which described the wrong problem.
+    await handler(
+      bodyReq('/dsh-hooks/hooks/save', { profile: 'web', hooks: [], pad: 'x'.repeat((1 << 20) + 16) }),
+      res,
+    )
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(413)
+    expect(body).toMatchObject({ ok: false, error: { code: 'payload-too-large' } })
   })
 })

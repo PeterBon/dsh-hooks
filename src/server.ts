@@ -130,21 +130,58 @@ export function isTrustedHostRequest(req: IncomingMessage): boolean {
   }
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+/** Body size cap for one POST (bytes); larger requests answer 413. */
+export const MAX_BODY_BYTES = 1 << 20
+
+/**
+ * Whether a request declares a JSON body. The media type is compared exactly
+ * (parameters such as `; charset=utf-8` ignored): a prefix test would accept
+ * `application/jsonp`, which is what the CSRF-hardening rule is meant to
+ * exclude. Also collapses the eight identical checks the POST routes used to
+ * carry inline.
+ */
+export function isJsonContentType(req: IncomingMessage): boolean {
+  const raw = req.headers['content-type']
+  const value = (Array.isArray(raw) ? raw[0] : raw) ?? ''
+  return value.split(';')[0]?.trim().toLowerCase() === 'application/json'
+}
+
+/** Answer 415 unless the request declares a JSON body; true when it does. */
+function requireJsonContentType(req: IncomingMessage, res: ServerResponse): boolean {
+  if (isJsonContentType(req)) return true
+  json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+  return false
+}
+
+/** Outcome of reading one JSON request body. */
+export interface JsonBodyRead {
+  /** Parsed value; absent when the body was empty, too large, or not JSON. */
+  value?: unknown
+  /** The body exceeded {@link MAX_BODY_BYTES} (answer 413, not "malformed"). */
+  tooLarge?: boolean
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<JsonBodyRead> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
     const buffer = chunk as Buffer
     chunks.push(buffer)
     total += buffer.length
-    if (total > 1 << 20) return null
+    // Stop reading and tell the caller why: answering "malformed JSON" here
+    // would be wrong, and draining a hostile multi-GB body is worse.
+    if (total > MAX_BODY_BYTES) {
+      // Optional call: real requests always have it, test doubles may not.
+      req.destroy?.()
+      return { tooLarge: true }
+    }
   }
   const text = Buffer.concat(chunks).toString('utf8')
-  if (text === '') return null
+  if (text === '') return {}
   try {
-    return JSON.parse(text) as unknown
+    return { value: JSON.parse(text) as unknown }
   } catch {
-    return null
+    return {}
   }
 }
 
@@ -271,12 +308,12 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       return
     }
     if (req.method === 'POST' && pathname === '/dsh-hooks/test') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+      if (!requireJsonContentType(req, res)) return
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
         return
       }
-      const payload = await readJsonBody(req)
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -360,12 +397,12 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       return
     }
     if (feishu !== undefined && req.method === 'POST' && pathname === '/dsh-hooks/feishu/setup') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+      if (!requireJsonContentType(req, res)) return
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
         return
       }
-      const payload = await readJsonBody(req)
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -388,12 +425,12 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       return
     }
     if (feishu !== undefined && req.method === 'POST' && pathname === '/dsh-hooks/feishu/config') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+      if (!requireJsonContentType(req, res)) return
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
         return
       }
-      const payload = await readJsonBody(req)
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -413,20 +450,12 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       return
     }
     if (feishu !== undefined && req.method === 'POST' && pathname === '/dsh-hooks/feishu/cancel') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
-        return
-      }
+      if (!requireJsonContentType(req, res)) return
       json(res, OK({ cancelled: feishu.manager.cancel() }))
       return
     }
     if (feishu !== undefined && req.method === 'POST' && pathname === '/dsh-hooks/feishu/test') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
-        return
-      }
+      if (!requireJsonContentType(req, res)) return
       try {
         const message = await runFeishuTestCard()
         json(res, OK({ message }))
@@ -437,12 +466,12 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       return
     }
     if (req.method === 'POST' && pathname === '/dsh-hooks/notify/test') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+      if (!requireJsonContentType(req, res)) return
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
         return
       }
-      const payload = await readJsonBody(req)
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -478,12 +507,12 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       return
     }
     if (req.method === 'POST' && pathname === '/dsh-hooks/hooks/save') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+      if (!requireJsonContentType(req, res)) return
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
         return
       }
-      const payload = await readJsonBody(req)
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -516,12 +545,12 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       return
     }
     if (feishu !== undefined && req.method === 'POST' && pathname === '/dsh-hooks/feishu/disconnect') {
-      const contentType = req.headers['content-type'] ?? ''
-      if (!contentType.toLowerCase().startsWith('application/json')) {
-        json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
+      if (!requireJsonContentType(req, res)) return
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
         return
       }
-      const payload = await readJsonBody(req)
       const body = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>
       const profile = typeof body.profile === 'string' && body.profile.trim() !== '' ? body.profile.trim() : 'web'
       if (rejectBadProfile(res, profile)) return

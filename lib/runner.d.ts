@@ -33,6 +33,22 @@ export interface RunLimiter {
 export declare const DEFAULT_TIMEOUT_MS = 10000;
 export declare const DEFAULT_RETRY_DELAY_MS = 500;
 /**
+ * Ceiling for the exponential retry backoff. Without it `retryDelayMs * 2 ** n`
+ * grows into minutes (`retries: 10` at the 500 ms default waits ~256 s for its
+ * last attempt), which keeps a logical run — and its `maxConcurrent` slot —
+ * alive long after the triggering event and makes the history timeline
+ * unreadable.
+ */
+export declare const MAX_RETRY_DELAY_MS = 30000;
+/** Backoff before one retry attempt: base doubling, capped at {@link MAX_RETRY_DELAY_MS}. */
+export declare function retryDelayFor(baseDelayMs: number, attempt: number): number;
+/**
+ * Trim captured stdout/stderr to `maxBytes` of real UTF-8 text, cutting on a
+ * character boundary (a half-written multi-byte sequence would otherwise show
+ * up as U+FFFD in the failure diagnostic). Exported for tests.
+ */
+export declare function capCaptureText(text: string, maxBytes?: number): string;
+/**
  * Terminate a spawned hook process. With `shell: true` on Windows the direct
  * child is cmd.exe — killing only the shell orphans the actual hook command
  * (e.g. `node notify-feishu.mjs`), so kill the whole tree first. The direct

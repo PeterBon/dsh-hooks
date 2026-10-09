@@ -280,12 +280,31 @@ function numericOps(value: RegExp | NumericMatch): NumericMatch | undefined {
 
 /** Does a numeric context field satisfy every declared comparison op? */
 function compareNumber(n: number, ops: NumericMatch): boolean {
-  if (ops.gt !== undefined && !(n > ops.gt)) return false
-  if (ops.gte !== undefined && !(n >= ops.gte)) return false
-  if (ops.lt !== undefined && !(n < ops.lt)) return false
-  if (ops.lte !== undefined && !(n <= ops.lte)) return false
-  if (ops.eq !== undefined && !(n === ops.eq)) return false
-  return true
+  // Fail closed: an empty comparison object (`match: { turn: {} }`) declares no
+  // condition at all, so it must not match everything. The alternative — a
+  // typo'd filter silently matching every event — is the more dangerous one.
+  let compared = false
+  if (ops.gt !== undefined) {
+    if (!(n > ops.gt)) return false
+    compared = true
+  }
+  if (ops.gte !== undefined) {
+    if (!(n >= ops.gte)) return false
+    compared = true
+  }
+  if (ops.lt !== undefined) {
+    if (!(n < ops.lt)) return false
+    compared = true
+  }
+  if (ops.lte !== undefined) {
+    if (!(n <= ops.lte)) return false
+    compared = true
+  }
+  if (ops.eq !== undefined) {
+    if (!(n === ops.eq)) return false
+    compared = true
+  }
+  return compared
 }
 
 /**
@@ -415,16 +434,23 @@ export function toolResultContext(
   step: number,
   callId: unknown,
   message: { content?: readonly { type?: unknown; text?: unknown }[] },
-  error: { name?: unknown; code?: unknown } | undefined,
+  error: { name?: unknown; code?: unknown; reason?: unknown } | undefined,
 ): HookContext {
   const key = callKey(session, callId)
   const paired = callTools.get(key)
   if (paired !== undefined) callTools.delete(key)
   let toolError: string | undefined
+  let toolErrorReason: string | undefined
   if (error !== undefined) {
     const name = typeof error.name === 'string' ? error.name : undefined
     const code = typeof error.code === 'string' ? error.code : undefined
     if (name !== undefined || code !== undefined) toolError = [name, code].filter(Boolean).join(': ')
+    // The host's failure facts carry a human-readable `reason` beside the
+    // machine identity; it used to be dropped, leaving the notification with a
+    // bare `ToolError: ENOENT`.
+    if (typeof error.reason === 'string' && error.reason.trim() !== '') {
+      toolErrorReason = error.reason.slice(0, 1000)
+    }
   }
   const content = textOfBlocks(message.content)
   return {
@@ -435,6 +461,7 @@ export function toolResultContext(
     callId: String(callId),
     toolDurationMs: paired === undefined ? undefined : Date.now() - paired.startedAt,
     toolError,
+    toolErrorReason,
     content: content === undefined ? undefined : content.slice(0, 4000),
   }
 }

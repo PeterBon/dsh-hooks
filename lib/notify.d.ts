@@ -4,6 +4,8 @@ import type { HookRunRecord } from './history.js';
 export interface NotifyResult {
     ok: boolean;
     error?: string;
+    /** True when the plugin was torn down mid-retry: not a delivery failure. */
+    aborted?: boolean;
 }
 export type NotifyRecord = (record: Omit<HookRunRecord, 'ts'>) => void;
 /**
@@ -13,12 +15,20 @@ export type NotifyRecord = (record: Omit<HookRunRecord, 'ts'>) => void;
 export interface NotifyRetryOptions {
     /** Retries after the first attempt. Defaults to 0 (one attempt, never retried). */
     retries?: number;
-    /** Base delay between retries in milliseconds; doubles per attempt. Defaults to 500. */
+    /** Base delay between retries in milliseconds; doubles per attempt, capped. Defaults to 500. */
     retryDelayMs?: number;
+    /**
+     * Per-attempt webhook timeout (ms); the hook's `timeoutMs`, defaulting to
+     * {@link NOTIFY_TIMEOUT_MS}. Per attempt — `retries` multiplies the worst
+     * case, which is why the backoff is capped.
+     */
+    timeoutMs?: number;
+    /** Aborts the retry loop (and any in-flight request) when the plugin unloads. */
+    signal?: AbortSignal;
     /** Retry progress lines (defaults to `console.warn`). */
     log?: (line: string) => void;
 }
-/** Fetch timeout for webhook sends (ms). */
+/** Default fetch timeout for one webhook attempt (ms). */
 export declare const NOTIFY_TIMEOUT_MS = 10000;
 /**
  * HTTP statuses worth retrying: rate limiting, request timeout, and

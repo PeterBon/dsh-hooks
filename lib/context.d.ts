@@ -23,6 +23,8 @@ export interface HookContext {
     toolArgs?: string;
     /** Tool failure identity (`name`/`code`) when a tool result errored. */
     toolError?: string;
+    /** Human-readable failure reason the host reports beside the tool error identity. */
+    toolErrorReason?: string;
     /** Producer source kind: user message source, title source, etc. */
     source?: string;
     durationMs?: number;
