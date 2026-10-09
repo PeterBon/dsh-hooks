@@ -133,6 +133,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `DSH_HOOK_CALL_ID` | 工具调用 id（审批 / 工具事件） |
 | `DSH_HOOK_TOOL_ARGS` | 工具原始参数 JSON（tool/call） |
 | `DSH_HOOK_TOOL_ERROR` | 工具失败标识 `名称: 代码`（tool/result 出错时） |
+| `DSH_HOOK_TOOL_ERROR_REASON` | 宿主在失败标识旁给出的人类可读原因（tool/result 出错且宿主提供了 `reason` 时） |
 | `DSH_HOOK_TOOL_DURATION_MS` | 工具执行耗时毫秒（tool/result；配对 tool/call 丢失时无此变量） |
 | `DSH_HOOK_SOURCE` | 消息 / 标题来源 kind（`user`、`plugin`、`fallback`、`provider`…） |
 | `DSH_HOOK_DURATION_MS` | 回合耗时毫秒（turn/end） |
@@ -232,7 +233,7 @@ config:
 
 - 比较语义只对**数字字段**生效；字段是字符串时比较**永不匹配**（不会把字符串转数字强比）。
 - 字符串语法以 `>`/`>=`/`<`/`<=`/`=` 开头且后跟数字才算比较（如 `'>10000'`）；其余字符串仍是普通正则。
-- 字段缺失照旧视为不匹配。空对象 `{}` 恒真（无任何条件）。
+- 字段缺失照旧视为不匹配。空对象 `{}` **永不匹配**（它没有声明任何条件；失败关闭比"写错过滤器反而匹配一切"安全）。
 
 ### 执行选项：enabled / cwd / maxConcurrent / debounceMs
 

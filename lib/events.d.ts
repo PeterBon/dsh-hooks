@@ -110,6 +110,7 @@ export declare function toolResultContext(session: Session, turn: number, step: 
 }, error: {
     name?: unknown;
     code?: unknown;
+    reason?: unknown;
 } | undefined): HookContext;
 export declare function userMessageContext(session: Session, content: readonly {
     type?: unknown;

@@ -122,6 +122,7 @@ export function webhookPayload(ctx: HookContext): Record<string, unknown> {
   if (ctx.callId !== undefined) payload.call_id = ctx.callId
   if (ctx.toolArgs !== undefined) payload.tool_args = ctx.toolArgs
   if (ctx.toolError !== undefined) payload.tool_error = ctx.toolError
+  if (ctx.toolErrorReason !== undefined) payload.tool_error_reason = ctx.toolErrorReason
   if (ctx.source !== undefined) payload.source = ctx.source
   if (ctx.durationMs !== undefined) payload.duration_ms = ctx.durationMs
   if (ctx.status !== undefined) payload.status = ctx.status

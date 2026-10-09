@@ -130,21 +130,38 @@ export function isTrustedHostRequest(req: IncomingMessage): boolean {
   }
 }
 
-async function readJsonBody(req: IncomingMessage): Promise<unknown> {
+/** Body size cap for one POST (bytes); larger requests answer 413. */
+export const MAX_BODY_BYTES = 1 << 20
+
+/** Outcome of reading one JSON request body. */
+export interface JsonBodyRead {
+  /** Parsed value; absent when the body was empty, too large, or not JSON. */
+  value?: unknown
+  /** The body exceeded {@link MAX_BODY_BYTES} (answer 413, not "malformed"). */
+  tooLarge?: boolean
+}
+
+async function readJsonBody(req: IncomingMessage): Promise<JsonBodyRead> {
   const chunks: Buffer[] = []
   let total = 0
   for await (const chunk of req) {
     const buffer = chunk as Buffer
     chunks.push(buffer)
     total += buffer.length
-    if (total > 1 << 20) return null
+    // Stop reading and tell the caller why: answering "malformed JSON" here
+    // would be wrong, and draining a hostile multi-GB body is worse.
+    if (total > MAX_BODY_BYTES) {
+      // Optional call: real requests always have it, test doubles may not.
+      req.destroy?.()
+      return { tooLarge: true }
+    }
   }
   const text = Buffer.concat(chunks).toString('utf8')
-  if (text === '') return null
+  if (text === '') return {}
   try {
-    return JSON.parse(text) as unknown
+    return { value: JSON.parse(text) as unknown }
   } catch {
-    return null
+    return {}
   }
 }
 
@@ -276,7 +293,11 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
         return
       }
-      const payload = await readJsonBody(req)
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
+        return
+      }
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -365,7 +386,11 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
         return
       }
-      const payload = await readJsonBody(req)
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
+        return
+      }
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -393,7 +418,11 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
         return
       }
-      const payload = await readJsonBody(req)
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
+        return
+      }
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -442,7 +471,11 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
         return
       }
-      const payload = await readJsonBody(req)
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
+        return
+      }
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -483,7 +516,11 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
         return
       }
-      const payload = await readJsonBody(req)
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
+        return
+      }
       if (typeof payload !== 'object' || payload === null) {
         json(res, FAIL('bad-request', 'malformed JSON body'), 400)
         return
@@ -521,7 +558,11 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         json(res, FAIL('bad-request', 'POST 需要 application/json'), 415)
         return
       }
-      const payload = await readJsonBody(req)
+      const { value: payload, tooLarge } = await readJsonBody(req)
+      if (tooLarge === true) {
+        json(res, FAIL('payload-too-large', `请求体超过 ${MAX_BODY_BYTES} 字节上限`), 413)
+        return
+      }
       const body = (typeof payload === 'object' && payload !== null ? payload : {}) as Record<string, unknown>
       const profile = typeof body.profile === 'string' && body.profile.trim() !== '' ? body.profile.trim() : 'web'
       if (rejectBadProfile(res, profile)) return

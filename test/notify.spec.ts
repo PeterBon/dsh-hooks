@@ -76,6 +76,18 @@ describe('webhookPayload', () => {
   it('omits absent groups', () => {
     expect(webhookPayload({ event: 'step/end', timestamp: 'T' })).toEqual({ event: 'step/end', timestamp: 'T' })
   })
+
+  it('carries the tool failure reason when the host reported one', () => {
+    const payload = webhookPayload({
+      event: 'tool/result',
+      timestamp: 'T',
+      tool: 'pwsh',
+      toolError: 'ENOENT: not-found',
+      toolErrorReason: '文件不存在',
+    })
+    expect(payload.tool_error).toBe('ENOENT: not-found')
+    expect(payload.tool_error_reason).toBe('文件不存在')
+  })
 })
 
 describe('sendWebhook', () => {

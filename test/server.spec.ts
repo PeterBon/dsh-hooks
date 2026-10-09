@@ -749,3 +749,19 @@ describe('Host/Origin fence (DNS rebinding)', () => {
     })
   })
 })
+
+describe('request body cap', () => {
+  it('answers 413 rather than "malformed JSON" for an oversized body', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
+    const res = fakeRes()
+    // One chunk past the 1 MiB cap: the old code returned "malformed JSON body"
+    // (400), which described the wrong problem.
+    await handler(
+      bodyReq('/dsh-hooks/hooks/save', { profile: 'web', hooks: [], pad: 'x'.repeat((1 << 20) + 16) }),
+      res,
+    )
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(413)
+    expect(body).toMatchObject({ ok: false, error: { code: 'payload-too-large' } })
+  })
+})

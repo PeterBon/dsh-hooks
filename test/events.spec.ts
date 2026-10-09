@@ -564,6 +564,38 @@ describe('new firehose events', () => {
     expect(ctx).toMatchObject({ event: 'tool/result', tool: undefined, toolError: 'EACCES: permission-denied' })
   })
 
+  it('surfaces the failure reason the host reports beside the error identity', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        callId: 'call-11',
+        message: { content: [], source: { kind: 'tool', callId: 'call-11' } },
+        error: { name: 'EACCES', code: 'permission-denied', reason: 'C:\\secret 不可读' },
+      }),
+    )
+    expect(ctx).toMatchObject({
+      toolError: 'EACCES: permission-denied',
+      toolErrorReason: 'C:\\secret 不可读',
+    })
+  })
+
+  it('leaves the failure reason absent when the host reports none', () => {
+    const ctx = classifySessionEvent(
+      fakeSession('s1'),
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        callId: 'call-12',
+        message: { content: [], source: { kind: 'tool', callId: 'call-12' } },
+        error: { name: 'ENOENT', code: 'not-found', reason: '   ' },
+      }),
+    )
+    expect(ctx?.toolError).toBe('ENOENT: not-found')
+    expect(ctx?.toolErrorReason).toBeUndefined()
+  })
+
   it('classifies user/message with source and content', () => {
     const ctx = classifySessionEvent(
       fakeSession('s1'),
@@ -687,8 +719,14 @@ describe('matchFilters', () => {
 
   it('treats an empty comparison object as never matching', () => {
     const numbered = { event: 'turn/end', turn: 7, timestamp: 'T' }
-    expect(matchFilters({ turn: {} }, numbered)).toBe(true)
+    // Fail closed: `{ turn: {} }` declares no condition at all, so it must not
+    // match every event — a typo'd filter silently matching everything is the
+    // more dangerous default.
+    expect(matchFilters({ turn: {} }, numbered)).toBe(false)
     expect(matchFilters({ turn: {} }, { event: 'turn/end', timestamp: 'T' })).toBe(false)
+    // A real operand still matches as before.
+    expect(matchFilters({ turn: { gt: 5 } }, numbered)).toBe(true)
+    expect(matchFilters({ turn: { gt: 9 } }, numbered)).toBe(false)
   })
 })
 

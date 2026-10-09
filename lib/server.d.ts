@@ -38,6 +38,15 @@ export declare function isLoopbackRequest(req: IncomingMessage): boolean;
  * front of the GUI (its forwarded hostname is not loopback).
  */
 export declare function isTrustedHostRequest(req: IncomingMessage): boolean;
+/** Body size cap for one POST (bytes); larger requests answer 413. */
+export declare const MAX_BODY_BYTES: number;
+/** Outcome of reading one JSON request body. */
+export interface JsonBodyRead {
+    /** Parsed value; absent when the body was empty, too large, or not JSON. */
+    value?: unknown;
+    /** The body exceeded {@link MAX_BODY_BYTES} (answer 413, not "malformed"). */
+    tooLarge?: boolean;
+}
 export interface FeishuRouteDeps {
     /** QR-scan session manager (one in-flight flow at a time). */
     manager: FeishuSetupManager;

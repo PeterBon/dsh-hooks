@@ -133,6 +133,7 @@ The `when` filter for `turn/end` matches the `reason.kind` value (`completed`, `
 | `DSH_HOOK_CALL_ID` | tool call id (approval / tool events) |
 | `DSH_HOOK_TOOL_ARGS` | raw tool arguments JSON (tool/call) |
 | `DSH_HOOK_TOOL_ERROR` | tool failure identity `name: code` (tool/result errors) |
+| `DSH_HOOK_TOOL_ERROR_REASON` | human-readable reason the host reports beside that identity (when a failed tool/result carries `reason`) |
 | `DSH_HOOK_TOOL_DURATION_MS` | wall-clock tool execution ms (tool/result; absent when the pairing tool/call was never seen) |
 | `DSH_HOOK_SOURCE` | message / title source kind (`user`, `plugin`, `fallback`, `provider`, …) |
 | `DSH_HOOK_DURATION_MS` | turn duration ms (turn/end) |
@@ -231,7 +232,7 @@ Rules:
 
 - Comparison semantics apply only to **numeric** fields; on a string field a comparison **never matches** (no string coercion).
 - A string value counts as a comparison only when it starts with `>` / `>=` / `<` / `<=` / `=` followed by a number (e.g. `'>10000'`); anything else stays a plain regex.
-- A missing field still never matches. An empty object `{}` matches vacuously.
+- A missing field still never matches. An empty object `{}` **never matches** — it declares no condition at all, and failing closed beats a typo'd filter silently matching every event.
 
 ### Execution options: enabled / cwd / maxConcurrent / debounceMs
 

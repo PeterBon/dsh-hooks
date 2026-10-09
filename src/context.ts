@@ -24,6 +24,8 @@ export interface HookContext {
   toolArgs?: string
   /** Tool failure identity (`name`/`code`) when a tool result errored. */
   toolError?: string
+  /** Human-readable failure reason the host reports beside the tool error identity. */
+  toolErrorReason?: string
   /** Producer source kind: user message source, title source, etc. */
   source?: string
   durationMs?: number
@@ -94,6 +96,7 @@ export function toEnv(ctx: HookContext): Record<string, string> {
   if (ctx.callId !== undefined) env.DSH_HOOK_CALL_ID = ctx.callId
   if (ctx.toolArgs !== undefined) env.DSH_HOOK_TOOL_ARGS = ctx.toolArgs
   if (ctx.toolError !== undefined) env.DSH_HOOK_TOOL_ERROR = ctx.toolError
+  if (ctx.toolErrorReason !== undefined) env.DSH_HOOK_TOOL_ERROR_REASON = ctx.toolErrorReason
   if (ctx.source !== undefined) env.DSH_HOOK_SOURCE = ctx.source
   if (ctx.durationMs !== undefined) env.DSH_HOOK_DURATION_MS = String(ctx.durationMs)
   if (ctx.status !== undefined) env.DSH_HOOK_STATUS = ctx.status
