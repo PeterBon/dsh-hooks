@@ -40,6 +40,14 @@ export declare function isLoopbackRequest(req: IncomingMessage): boolean;
 export declare function isTrustedHostRequest(req: IncomingMessage): boolean;
 /** Body size cap for one POST (bytes); larger requests answer 413. */
 export declare const MAX_BODY_BYTES: number;
+/**
+ * Whether a request declares a JSON body. The media type is compared exactly
+ * (parameters such as `; charset=utf-8` ignored): a prefix test would accept
+ * `application/jsonp`, which is what the CSRF-hardening rule is meant to
+ * exclude. Also collapses the eight identical checks the POST routes used to
+ * carry inline.
+ */
+export declare function isJsonContentType(req: IncomingMessage): boolean;
 /** Outcome of reading one JSON request body. */
 export interface JsonBodyRead {
     /** Parsed value; absent when the body was empty, too large, or not JSON. */

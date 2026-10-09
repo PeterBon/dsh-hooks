@@ -198,6 +198,21 @@ describe('createHookHandler', () => {
     expect(readJson(res).statusCode).toBe(415)
   })
 
+  it('matches the media type exactly and still allows parameters', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
+    // A prefix test used to let `application/jsonp` through the CSRF guard.
+    const prefixed = fakeRes()
+    await handler(bodyReq('/dsh-hooks/test', { event: 'turn/end' }, { 'content-type': 'application/jsonp' }), prefixed)
+    expect(readJson(prefixed).statusCode).toBe(415)
+
+    const withParams = fakeRes()
+    await handler(
+      bodyReq('/dsh-hooks/test', { event: 'turn/end' }, { 'content-type': 'application/json; charset=utf-8' }),
+      withParams,
+    )
+    expect(readJson(withParams).statusCode).toBe(200)
+  })
+
   it('rejects malformed test bodies', async () => {
     const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }) })
     const res = fakeRes()
