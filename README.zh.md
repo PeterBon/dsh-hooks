@@ -270,6 +270,24 @@ config:
 - 回合内没有直接用户消息（如目标续跑回合）时，`turn/start` 在 `turn/end` 时**不带内容**派发；新回合开始会先冲掉上一个未认领的 `turn/start`。
 - 直接用户回合中，延迟通常只有几毫秒（`user/message` 紧随 `turn/start`），先于任何步骤/工具事件。
 
+## 通用 webhook 示例
+
+除了飞书，`examples/notify-webhook.mjs` 把完整 hook 上下文作为一份 JSON POST 到任意 HTTP 端点——Slack 入站 webhook、Discord、企业微信/钉钉自定义机器人、ntfy、Bark、n8n 都能接：
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    hooks:
+      - on: 'turn/end'
+        when: 'completed'
+        run: 'node examples/notify-webhook.mjs --url https://hooks.slack.com/services/…'
+      - on: 'tool/result'        # 工具连续失败时告警
+        run: 'node examples/notify-webhook.mjs --slack'
+```
+
+URL 也可放在 dsh 进程环境的 `DSH_HOOKS_WEBHOOK_URL`（不要写进配置文件）。`--slack` 把 payload 换成一行摘要的 `{ text }` 格式；`--timeout <ms>` 控制超时（默认 10000，传输失败自动重试一次）。
+
 ## 执行历史
 
 每次 hook 触发都会记入内存环形缓冲（默认 500 条），并 best-effort 追加到 `~/.dsh/dsh-hooks/history.jsonl`（权限 0600）——供未来 UI 与调试使用。环形缓冲在启动时从 JSONL 尾部回填（只读最新一段，不整文件读入），Web 面板每次读取时增量同步磁盘上新增的记录（包括其他 dsh 进程的追加，如任务看板 Host），因此重启后历史不会消失。文件超过 2 MB 会被原子压缩，只保留最新一段（保留量取 `tailBytes` 与 `maxBytes` 的较小者）。唯一的并发缺口：若另一进程的追加恰好落在本进程「同步」与「写入」之间的窗口内，游标无法由长度差推导，此时会从文件尾部重建缓冲（尾部窗口远大于环形容量，所以可见记录不会减少）。记录不含 secret（环境变量从不入记录）：
@@ -450,24 +468,6 @@ services:
 ```
 
 若白名单配置后仍收到该错误，先确认变量已传入实际服务进程，再检查服务端看到的是客户端 IP 还是代理/网关 IP。若连接超时或被拒绝连接，则还需检查监听地址、端口映射和网络规则。
-
-## 通用 webhook 示例
-
-除了飞书，`examples/notify-webhook.mjs` 把完整 hook 上下文作为一份 JSON POST 到任意 HTTP 端点——Slack 入站 webhook、Discord、企业微信/钉钉自定义机器人、ntfy、Bark、n8n 都能接：
-
-```yaml
-- id: dsh-hooks
-  name: dsh-hooks
-  config:
-    hooks:
-      - on: 'turn/end'
-        when: 'completed'
-        run: 'node examples/notify-webhook.mjs --url https://hooks.slack.com/services/…'
-      - on: 'tool/result'        # 工具连续失败时告警
-        run: 'node examples/notify-webhook.mjs --slack'
-```
-
-URL 也可放在 dsh 进程环境的 `DSH_HOOKS_WEBHOOK_URL`（不要写进配置文件）。`--slack` 把 payload 换成一行摘要的 `{ text }` 格式；`--timeout <ms>` 控制超时（默认 10000，传输失败自动重试一次）。
 
 ## 飞书通知示例
 
