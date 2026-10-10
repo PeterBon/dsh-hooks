@@ -9,7 +9,7 @@ vi.mock('../examples/notify-feishu.mjs', () => ({
 }))
 
 import { run as notifyRun } from '../examples/notify-feishu.mjs'
-import { mergePatchYaml, notifyScriptPath, setupFeishu, setupHooks, testFeishu, writeConfig } from '../bin/dsh-hooks.mjs'
+import { mergePatchYaml, notifyScriptPath, setupFeishu, setupHooks, stableScriptPath, testFeishu, writeConfig } from '../bin/dsh-hooks.mjs'
 
 let tmp: string
 
@@ -23,8 +23,8 @@ afterEach(() => {
 })
 
 describe('setupHooks / notifyScriptPath', () => {
-  it('declares the card hooks for turn/approval/agent events', () => {
-    const hooks = setupHooks('C:\\x\\notify-feishu.mjs')
+  it('declares built-in feishu-channel hooks for turn/approval/agent events', () => {
+    const hooks = setupHooks()
     expect(hooks.map((h) => `${h.on}${h.when ?? ''}`)).toEqual([
       'turn/endcompleted',
       'turn/enderror',
@@ -32,22 +32,30 @@ describe('setupHooks / notifyScriptPath', () => {
       'approval/asked',
       'agent/error',
     ])
-    expect(hooks[0].run).toContain('notify-feishu.mjs')
-    expect(hooks[3].run).toContain('--approval')
+    // The setup writes the built-in channel: no script copy, no `run:` command.
+    for (const hook of hooks) {
+      expect(hook.notify).toEqual({ channel: 'feishu' })
+      expect(hook.run).toBeUndefined()
+    }
   })
 
   it('notifyScriptPath points at the shipped example', () => {
     expect(notifyScriptPath().replace(/\\/g, '/')).toMatch(/examples\/notify-feishu\.mjs$/)
   })
+
+  it('stableScriptPath is still resolvable for hand-written script config', () => {
+    expect(stableScriptPath().replace(/\\/g, '/')).toMatch(/\.dsh\/dsh-hooks\/notify-feishu\.mjs$/)
+  })
 })
 
 describe('mergePatchYaml', () => {
   it('inserts a dsh-hooks entry into an empty patch list', () => {
-    const out = mergePatchYaml('[]\n', { scriptPath: 'C:\\x\\notify-feishu.mjs' })
+    const out = mergePatchYaml('[]\n')
     expect(out).toContain('id: dsh-hooks')
     expect(out).toContain('name: dsh-hooks')
     expect(out).toContain('- on: turn/end')
     expect(out).toContain('approval/asked')
+    expect(out).toContain('channel: feishu')
   })
 
   it('preserves other entries and replaces the dsh-hooks config', () => {
@@ -63,7 +71,7 @@ describe('mergePatchYaml', () => {
       "      - on: 'turn/start'",
       "        run: 'echo old'",
     ].join('\n')
-    const out = mergePatchYaml(existing, { scriptPath: 'X' })
+    const out = mergePatchYaml(existing)
     expect(out).toContain('other-plugin')
     expect(out).toContain('keep: true')
     expect(out).not.toContain('echo old')
@@ -73,7 +81,7 @@ describe('mergePatchYaml', () => {
   })
 
   it('rejects a non-array top level', () => {
-    expect(() => mergePatchYaml('a: 1\n', { scriptPath: 'X' })).toThrow('必须是 YAML 数组')
+    expect(() => mergePatchYaml('a: 1\n')).toThrow('必须是 YAML 数组')
   })
 })
 

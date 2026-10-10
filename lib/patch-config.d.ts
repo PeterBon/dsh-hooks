@@ -44,8 +44,15 @@ export interface WriteHooksResult {
  */
 export declare function writeHooksConfig(patchFile: string, hooks: HookWireSpec[]): WriteHooksResult;
 /**
- * Drop every hook whose `run` references the given script (the stable
- * notify-feishu.mjs copy), used by the Feishu disconnect flow. Other
- * entries and config stay untouched.
+ * Drop every hook whose `run` references the given script (the legacy
+ * notify-feishu.mjs copy). Other entries and config stay untouched.
  */
 export declare function removeScriptHooks(patchFile: string, scriptMarker: string): void;
+/**
+ * Drop every Feishu notification hook, in both shapes it has ever been written:
+ * the legacy `run: node …/notify-feishu.mjs` form and the built-in
+ * `notify: { channel: 'feishu' }` form the setup writes today. Used by the
+ * disconnect flow, which must not leave a hook behind that keeps posting to a
+ * deleted app.
+ */
+export declare function removeFeishuHooks(patchFile: string): void;

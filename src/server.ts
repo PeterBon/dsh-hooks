@@ -20,7 +20,7 @@ import { fireNotify, summarizeContext } from './notify.js'
 import type { HookContext } from './context.js'
 import { FEISHU_SETUP_BUSY, type FeishuSetupManager } from './feishu-session.js'
 import { deleteFeishuConfig, readFeishuSummary, runFeishuTest, updateFeishuResultMaxChars } from './feishu.js'
-import { removeScriptHooks, writeHooksConfig, type HookWireSpec } from './patch-config.js'
+import { removeFeishuHooks, writeHooksConfig, type HookWireSpec } from './patch-config.js'
 
 /** Minimal structural shape of the shared web server (dsh-host-webserver). */
 export interface WebServerLike {
@@ -560,7 +560,7 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       const existed = deleteFeishuConfig(feishuConfigPath)
       if (removeHooks) {
         try {
-          removeScriptHooks(resolvePatch(profile), 'notify-feishu.mjs')
+          removeFeishuHooks(resolvePatch(profile))
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           json(res, FAIL('save-failed', message), 400)

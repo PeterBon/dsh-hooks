@@ -373,7 +373,7 @@ In the web profile (when the shared webServer service exists) dsh-hooks register
 | `/dsh-hooks/feishu/cancel` | POST | cancel the pending scan session (aborts the registerApp wait) |
 | `/dsh-hooks/feishu/config` | POST | update the card truncation length: `{"resultMaxChars":800}` (50–5000); effective immediately, credentials preserved |
 | `/dsh-hooks/feishu/test` | POST | send a test card with the stored credentials |
-| `/dsh-hooks/feishu/disconnect` | POST | disconnect: delete the credential file; `removeHooks: true` also drops the hooks referencing notify-feishu.mjs (with a backup) |
+| `/dsh-hooks/feishu/disconnect` | POST | disconnect: delete the credential file; `removeHooks: true` also drops the Feishu notification hooks (both the legacy `run: …notify-feishu.mjs` form and the built-in channel form, with a backup) |
 
 POSTs require `application/json` in every access mode (blocks cross-site form CSRF), and every request must carry a trusted `Host`/`Origin` hostname (see [Configure the Host / Origin fence](#configure-the-host--origin-fence-dns-rebinding)). The web profile also gets a systemPrompt section announcing the plugin to agents.
 
@@ -468,23 +468,21 @@ If an allowlisted client still receives this error, confirm the variable reached
 
 ## Feishu notification example
 
-Two ways to connect — the **Web GUI scan** (recommended, no terminal) or the one-shot setup CLI. Both create the Feishu app via a QR-code scan and write the credentials to `~/.dsh/dsh-hooks/feishu-config.json`.
-
-There are two ways to deliver, and the **built-in channel is the recommended one**:
+Two ways to connect — the **Web GUI scan** (recommended, no terminal) or the one-shot setup CLI. Both create the Feishu app via a QR-code scan, write the credentials to `~/.dsh/dsh-hooks/feishu-config.json`, and write these five hooks as **built-in channel** notifications.
 
 ```yaml
-# Built-in channel: credentials come from the scan above (or DSH_HOOKS_FEISHU_* env vars); no script involved
+# What the scan / CLI flow writes: credentials come from the scan (or DSH_HOOKS_FEISHU_* env vars); no script involved
 - on: 'turn/end'
   when: completed
   notify: { channel: 'feishu' }
 
-# Script form (what the scan flow still writes today; kept for setups that want a standalone script)
+# Script form: for hand-written config and reuse outside the plugin (see "Option 3" below)
 - on: 'turn/end'
   when: completed
-  run: node "~/.dsh/dsh-hooks/notify-feishu.mjs"
+  run: node "examples/notify-feishu.mjs"
 ```
 
-Both go through the **same rendering pipeline** — same card presentation, same credential resolution, same truncation setting — the only difference is that the built-in channel sends in-process. To migrate, replace `run: node …notify-feishu.mjs` with `notify: { channel: 'feishu' }` and delete the script copy. `timeoutMs` does not apply to this channel (it never applied to the script either); retries follow the webhook semantics (transport/API failures retry, missing configuration does not).
+Both go through the **same rendering pipeline** — same card presentation, same credential resolution, same truncation setting — the only difference is that the built-in channel sends in-process and needs no script copy. Upgrading: the scan flow in 0.14.3 and earlier wrote `run: node "~/.dsh/dsh-hooks/notify-feishu.mjs"` plus a copy of that script; to migrate, replace the hook with `notify: { channel: 'feishu' }` (the `--approval` argument was always a no-op and can simply go) and delete the copy. `timeoutMs` does not apply to this channel (it never applied to the script either); retries follow the webhook semantics (transport/API failures retry, missing configuration does not).
 
 ### Option 1: scan in the Web GUI
 
@@ -510,7 +508,7 @@ Both options write the same files:
 | File | Purpose |
 | --- | --- |
 | `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret + your open_id as the notification target (0600, never committed); `result_max_chars` sets the card content truncation (default 300, editable in the Web GUI) |
-| `~/.dsh/dsh-hooks/notify-feishu.mjs` | stable copy of the notify script the hooks reference (only needed by script-style hooks; not needed once you switch to the built-in `notify: { channel: 'feishu' }`) |
+| `~/.dsh/dsh-hooks/notify-feishu.mjs` | legacy: the scan flow up to 0.14.3 wrote this script copy; it is no longer created (hooks use the built-in channel). Still works if it exists and a hook references it |
 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks block: `turn/end` (completed/error/aborted) + `approval/asked` + `agent/error` card hooks |
 
 Restart `dsh web` afterwards — you will get cards when turns finish, approvals are asked, or the agent errors.
@@ -547,7 +545,7 @@ Prefer wiring a standalone script (reusable outside the plugin)? See [`examples/
         run: 'node D:/path/to/examples/notify-feishu.mjs --approval'
 ```
 
-Both forms read the same credentials and go through the same rendering pipeline; the built-in channel drops the script copy, while the script form stays reusable outside the plugin (e.g. called directly by other automation).
+Both forms read the same credentials and go through the same rendering pipeline; the scan flow writes the built-in channel (no script needed), while the script form stays reusable outside the plugin (e.g. called directly by other automation).
 
 ## Security
 

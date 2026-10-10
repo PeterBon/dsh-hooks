@@ -16,6 +16,7 @@ import YAML from 'yaml'
 import type { registerApp } from '@larksuiteoapi/node-sdk'
 import { run as notifyRun } from '../examples/notify-feishu.mjs'
 import { profilePatchFile } from './profile-path.js'
+import type { HookWireSpec } from './patch-config.js'
 
 /** Feishu config dir: credentials + the stable copy of the notify script. */
 export const FEISHU_CONFIG_DIR = join(homedir(), '.dsh', 'dsh-hooks')
@@ -33,7 +34,11 @@ export interface FeishuSetupPaths {
   configPath?: string
   /** Profile patch file (default ~/.dsh/profiles/<profile>/cordis.patch.yml). */
   patchFile?: string
-  /** Stable notify-script location the hooks reference. */
+  /**
+   * Legacy stable notify-script location. The setup no longer copies or
+   * references a script (hooks use the built-in `feishu` channel); kept so
+   * {@link stableScriptPath} callers and older tests still resolve.
+   */
   notifyScript?: string
 }
 
@@ -78,25 +83,33 @@ export function patchPath(profile: string): string {
 /**
  * Render a script path for a generated hook command.
  *
- * These commands are written into a YAML **plain scalar**, where nothing is
- * unescaped: `JSON.stringify` used to emit `"C:\\Users\\…"`, which YAML keeps
- * verbatim, so the doubled separators only worked because Windows tolerates
- * repeated separators. Forward slashes are valid for Node on every platform and
- * need no escape processing; quoting stays for paths containing spaces.
+ * @deprecated The setup no longer generates `run:` commands at all — it writes
+ * the built-in `notify: { channel: 'feishu' }` hooks (see {@link setupHooks}),
+ * so no path has to be escaped into YAML. Kept for hand-written config helpers.
  */
 export function hookCommandPath(scriptPath: string): string {
   return `"${scriptPath.replace(/\\/g, '/')}"`
 }
 
-/** Which hooks the setup installs into the profile. */
-export function setupHooks(scriptPath: string) {
-  const command = hookCommandPath(scriptPath)
+/**
+ * Which hooks the setup installs into the profile: five built-in `feishu`
+ * channel notifications.
+ *
+ * The setup used to copy `notify-feishu.mjs` beside the credentials and write
+ * five `run: node <script>` hooks. Since the plugin can send those cards
+ * in-process through the very same rendering pipeline, nothing has to be copied
+ * and no script path can go stale — that copy is also what put a JSON-escaped
+ * `C:\\Users\\…` into a YAML plain scalar. The script form is still available
+ * for hand-written config (see `examples/notify-feishu.mjs`).
+ */
+export function setupHooks(): HookWireSpec[] {
+  const feishu = { notify: { channel: 'feishu' as const } }
   return [
-    { on: 'turn/end', when: 'completed', run: `node ${command}`, timeoutMs: 30000 },
-    { on: 'turn/end', when: 'error', run: `node ${command}`, timeoutMs: 30000 },
-    { on: 'turn/end', when: 'aborted', run: `node ${command}`, timeoutMs: 30000 },
-    { on: 'approval/asked', run: `node ${command} --approval`, timeoutMs: 30000 },
-    { on: 'agent/error', run: `node ${command}`, timeoutMs: 30000 },
+    { on: 'turn/end', when: 'completed', ...feishu },
+    { on: 'turn/end', when: 'error', ...feishu },
+    { on: 'turn/end', when: 'aborted', ...feishu },
+    { on: 'approval/asked', ...feishu },
+    { on: 'agent/error', ...feishu },
   ]
 }
 
@@ -106,11 +119,13 @@ export function notifyScriptPath(): string {
 }
 
 /**
- * Resolve the stable notify-script location hooks should reference. The npx
- * cache (where the CLI often runs from) is ephemeral, so the setup copies the
- * zero-dependency script next to feishu-config.json:
- * ~/.dsh/dsh-hooks/notify-feishu.mjs. Re-copies on every setup so the stable
- * copy tracks the installed version.
+ * Legacy stable location of the notify script beside the credentials
+ * (`~/.dsh/dsh-hooks/notify-feishu.mjs`).
+ *
+ * The setup used to copy the script there and reference it from five
+ * `run: node <script>` hooks; it now installs the built-in `feishu` channel, so
+ * this path is only meaningful for hand-written config that still wires the
+ * script form. Kept exported for CLI parity (see `bin/dsh-hooks.mjs`).
  */
 export function stableScriptPath(paths: FeishuSetupPaths = {}): string {
   return paths.notifyScript ?? join(FEISHU_CONFIG_DIR, 'notify-feishu.mjs')
@@ -155,7 +170,7 @@ export function writeConfig(
  * existing dsh-hooks entries keep unrelated config and get their hooks
  * replaced with `setupHooks`; other entries stay untouched. Idempotent.
  */
-export function mergePatchYaml(existingText: string, { scriptPath }: { scriptPath: string }): string {
+export function mergePatchYaml(existingText: string): string {
   let entries: unknown
   try {
     entries = YAML.parse(existingText || '[]\n')
@@ -164,7 +179,7 @@ export function mergePatchYaml(existingText: string, { scriptPath }: { scriptPat
   }
   if (!Array.isArray(entries)) throw new Error('cordis.patch.yml 顶层必须是 YAML 数组')
 
-  const hooks = setupHooks(scriptPath)
+  const hooks = setupHooks()
   let found = false
   for (const entry of entries) {
     if (entry && typeof entry === 'object' && (entry as { id?: unknown }).id === 'dsh-hooks') {
@@ -190,7 +205,6 @@ export async function runFeishuSetup(options: RunFeishuSetupOptions = {}): Promi
   const paths = options.paths ?? {}
   const configPath = paths.configPath ?? FEISHU_CONFIG_PATH
   const patchFile = paths.patchFile ?? patchPath(profile)
-  const notifyScript = stableScriptPath(paths)
 
   print('dsh-hooks feishu-setup')
   print('1/4 正在生成飞书「一键创建应用」二维码…')
@@ -238,17 +252,10 @@ export async function runFeishuSetup(options: RunFeishuSetupOptions = {}): Promi
   })
   print(`3/4 凭据已写入 ${configPath}（权限 0600，勿提交到仓库）`)
 
-  // Copy the notify script to its stable location so hooks never reference
-  // the ephemeral npx cache.
-  if (!paths.notifyScript) {
-    mkdirSync(FEISHU_CONFIG_DIR, { recursive: true, mode: 0o700 })
-    writeFileSync(notifyScript, readFileSync(notifyScriptPath(), 'utf8'), 'utf8')
-  }
-
   const existing = existsSync(patchFile) ? readFileSync(patchFile, 'utf8') : '[]\n'
-  const merged = mergePatchYaml(existing, { scriptPath: notifyScript })
+  const merged = mergePatchYaml(existing)
   writeFileSync(patchFile, merged, 'utf8')
-  print(`4/4 hook 配置已写入 ${patchFile}`)
+  print(`4/4 hook 配置已写入 ${patchFile}（内置 feishu 通道，无需脚本）`)
 
   print('发送欢迎卡片验证…')
   try {
