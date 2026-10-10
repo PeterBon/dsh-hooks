@@ -270,6 +270,24 @@ config:
 - 回合内没有直接用户消息（如目标续跑回合）时，`turn/start` 在 `turn/end` 时**不带内容**派发；新回合开始会先冲掉上一个未认领的 `turn/start`。
 - 直接用户回合中，延迟通常只有几毫秒（`user/message` 紧随 `turn/start`），先于任何步骤/工具事件。
 
+## 通用 webhook 示例
+
+除了飞书，`examples/notify-webhook.mjs` 把完整 hook 上下文作为一份 JSON POST 到任意 HTTP 端点——Slack 入站 webhook、Discord、企业微信/钉钉自定义机器人、ntfy、Bark、n8n 都能接：
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    hooks:
+      - on: 'turn/end'
+        when: 'completed'
+        run: 'node examples/notify-webhook.mjs --url https://hooks.slack.com/services/…'
+      - on: 'tool/result'        # 工具连续失败时告警
+        run: 'node examples/notify-webhook.mjs --slack'
+```
+
+URL 也可放在 dsh 进程环境的 `DSH_HOOKS_WEBHOOK_URL`（不要写进配置文件）。`--slack` 把 payload 换成一行摘要的 `{ text }` 格式；`--timeout <ms>` 控制超时（默认 10000，传输失败自动重试一次）。
+
 ## 执行历史
 
 每次 hook 触发都会记入内存环形缓冲（默认 500 条），并 best-effort 追加到 `~/.dsh/dsh-hooks/history.jsonl`（权限 0600）——供未来 UI 与调试使用。环形缓冲在启动时从 JSONL 尾部回填（只读最新一段，不整文件读入），Web 面板每次读取时增量同步磁盘上新增的记录（包括其他 dsh 进程的追加，如任务看板 Host），因此重启后历史不会消失。文件超过 2 MB 会被原子压缩，只保留最新一段（保留量取 `tailBytes` 与 `maxBytes` 的较小者）。唯一的并发缺口：若另一进程的追加恰好落在本进程「同步」与「写入」之间的窗口内，游标无法由长度差推导，此时会从文件尾部重建缓冲（尾部窗口远大于环形容量，所以可见记录不会减少）。记录不含 secret（环境变量从不入记录）：
@@ -293,9 +311,10 @@ config:
 dsh-hooks tail                                  # 回放最近 10 条，然后实时跟进
 dsh-hooks tail --event turn/end --outcome exit-nonzero   # 只看失败的回合结束
 dsh-hooks tail --hook notify-feishu --n 50 --json         # 50 条起，输出原始 JSONL 供 jq
+dsh-hooks tail --interval 2000 --file D:/tmp/history.jsonl   # 轮询间隔（默认 500ms）与自定义文件
 ```
 
-`tail` 的 JSONL 路径取自 profile 配置的 `history.path`（未配置或配置读不出来时回落到默认路径，不会因为配置文件半途改动而报错）。它只读新增字节、容忍半行（等换行再输出）、文件被截断/轮转时自动从 0 重新跟进。
+`tail` 的 JSONL 路径取自 profile 配置的 `history.path`（可用 `--file <path>` 直接指定；未配置或配置读不出来时回落到默认路径，不会因为配置文件半途改动而报错）。它只读新增字节、容忍半行（等换行再输出）、文件被截断/轮转时自动从 0 重新跟进；`--interval <ms>` 控制轮询间隔（默认 500）。
 
 ## dry-run：验证配置
 
@@ -334,9 +353,9 @@ dsh-hooks dry-run usage/daily --field usageCacheReadTokens=90000   # 通用写�
 
 - **状态徽章**：插件版本、hook 数、历史条数，以及运行诊断（正在执行的 hook 数、最近失败数）
 - **手动测试**：选事件（18 类）+ reason/tool，并可用「模拟字段」一行填入 `runningSubagents` / `durationMs` / usage 输入输出等数值上下文；「模拟」看逐 hook 匹配报告，「执行」真实触发；切换输入自动清空旧结果
-- **通知渠道测试**：向 webhook（可选 Slack 摘要）/ desktop 渠道发一条测试通知，显示发送内容预览
+- **通知渠道测试**：向 webhook（可选 Slack 摘要）/ desktop 渠道发一条测试通知，显示发送内容预览；飞书渠道的测试用上面「飞书通知」里的一键测试卡片
 - **飞书通知**：网页内扫码连接飞书——显示二维码（含有效期倒计时、可取消），扫码后自动创建应用、写入凭据与 hook 配置；已连接后显示应用摘要，可一键发送测试卡片、调整卡片截断长度（50–5000 字符，默认 300，带正文预览）、重新扫码换绑或断开连接（可选一并移除飞书 hooks）
-- **当前 hooks**：只读清单（事件/when/match/run/notify + 超时重试参数），一键「复制 YAML」；点「编辑」进入表单编辑器，增删改 hook 后写回 `cordis.patch.yml`（自动备份原文件、写前校验正则与 run/notify 二选一，保存即热加载）
+- **当前 hooks**：只读清单（事件/when/match/run/notify + 超时重试参数），一键「复制 YAML」；点「编辑」进入表单编辑器，增删改 hook 后写回 `cordis.patch.yml`（自动备份原文件、写前校验正则与 run/notify 二选一，保存即热加载）。每个 hook 的「动作」下拉可选 `执行命令（run）`、`通知 webhook`、`通知 desktop` 或 `通知 feishu`（用扫码写入的凭据，不需要脚本）
 - **执行历史时间线**：位于分区底部、**默认折叠**（展开状态记忆于 localStorage），5 秒自动刷新。展开后可按**事件 / 结果 / 会话**过滤（条件同样记忆在 localStorage，附「显示 N / 共 M 条」计数与「清空过滤」），并把当前视图**导出为 JSONL**（与磁盘上的 `history.jsonl` 同格式，文件名带本地时间戳）——面板一次拉取最近 200 条，过滤在浏览器侧完成
 
 CLI/headless 环境完全不受影响：浏览器半只在 web 加载，核心零 UI 运行时依赖。
@@ -450,24 +469,6 @@ services:
 
 若白名单配置后仍收到该错误，先确认变量已传入实际服务进程，再检查服务端看到的是客户端 IP 还是代理/网关 IP。若连接超时或被拒绝连接，则还需检查监听地址、端口映射和网络规则。
 
-## 通用 webhook 示例
-
-除了飞书，`examples/notify-webhook.mjs` 把完整 hook 上下文作为一份 JSON POST 到任意 HTTP 端点——Slack 入站 webhook、Discord、企业微信/钉钉自定义机器人、ntfy、Bark、n8n 都能接：
-
-```yaml
-- id: dsh-hooks
-  name: dsh-hooks
-  config:
-    hooks:
-      - on: 'turn/end'
-        when: 'completed'
-        run: 'node examples/notify-webhook.mjs --url https://hooks.slack.com/services/…'
-      - on: 'tool/result'        # 工具连续失败时告警
-        run: 'node examples/notify-webhook.mjs --slack'
-```
-
-URL 也可放在 dsh 进程环境的 `DSH_HOOKS_WEBHOOK_URL`（不要写进配置文件）。`--slack` 把 payload 换成一行摘要的 `{ text }` 格式；`--timeout <ms>` 控制超时（默认 10000，传输失败自动重试一次）。
-
 ## 飞书通知示例
 
 两种接入方式任选：**Web GUI 扫码**（推荐，无需终端）或 **setup CLI**——扫码自动创建飞书应用；凭据写入 `~/.dsh/dsh-hooks/feishu-config.json`。
@@ -512,7 +513,7 @@ dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
 | 文件 | 用途 |
 | --- | --- |
 | `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret 与你的 open_id（通知目标），权限 0600，严禁提交；`result_max_chars` 控制卡片内容截断长度（默认 300，可在 Web GUI 中修改） |
-| `~/.dsh/dsh-hooks/notify-feishu.mjs` | hook 引用的通知脚本稳定副本 |
+| `~/.dsh/dsh-hooks/notify-feishu.mjs` | hook 引用的通知脚本稳定副本（仅脚本式 hook 需要；改用内置通道 `notify: { channel: 'feishu' }` 后不再需要） |
 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks 配置块：`turn/end`（completed/error/aborted）+ `approval/asked` + `agent/error` 卡片 hook |
 
 完成后重启 `dsh web`——回合结束、请求审批、agent 出错时就会收到卡片通知。
@@ -521,7 +522,21 @@ dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
 
 ### 方式三：手动配置
 
-想自己接线？见 [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs)——零依赖脚本，通过飞书**应用 API**（不需要群自定义机器人）发送回合完成 / 审批通知。配置示例：
+不想装脚本、只想手写配置：直接在环境里提供 `DSH_HOOKS_FEISHU_APP_ID` / `DSH_HOOKS_FEISHU_APP_SECRET` / `DSH_HOOKS_FEISHU_TO`（绝不能写进配置文件），然后声明**内置通道**：
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    hooks:
+      - on: 'turn/end'
+        when: 'completed'
+        notify: { channel: 'feishu' }
+      - on: 'approval/asked'
+        notify: { channel: 'feishu' }
+```
+
+想自己接线（独立脚本，可在插件之外复用）：见 [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs)——零依赖脚本，通过飞书**应用 API**（不需要群自定义机器人）发送回合完成 / 审批通知。配置示例：
 
 ```yaml
 - id: dsh-hooks
@@ -535,7 +550,7 @@ dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
         run: 'node D:/path/to/examples/notify-feishu.mjs --approval'
 ```
 
-同时在 dsh 进程环境中提供 `DSH_HOOKS_FEISHU_APP_ID` / `DSH_HOOKS_FEISHU_APP_SECRET` / `DSH_HOOKS_FEISHU_TO`（绝不能写进配置文件）。
+两种写法读同一份凭据、走同一条渲染管线；内置通道少一个脚本副本，脚本方式便于在插件之外复用（例如别的自动化直接调用）。
 
 ## 安全
 

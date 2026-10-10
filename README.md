@@ -310,9 +310,10 @@ To follow the log while you work, use `tail` (Ctrl+C to quit):
 dsh-hooks tail                                            # replay the last 10, then follow
 dsh-hooks tail --event turn/end --outcome exit-nonzero    # only failed turn ends
 dsh-hooks tail --hook notify-feishu --n 50 --json         # 50 backfill lines, raw JSONL for jq
+dsh-hooks tail --interval 2000 --file D:/tmp/history.jsonl   # poll interval (default 500 ms) and a custom file
 ```
 
-`tail` resolves the JSONL path from the profile's `history.path`, falling back to the default without failing when the config file is missing or mid-edit. It reads only appended bytes, waits for complete lines (a record observed mid-write stays pending), and restarts from byte 0 when the file is truncated or rotated.
+`tail` resolves the JSONL path from the profile's `history.path` (or `--file <path>` directly), falling back to the default without failing when the config file is missing or mid-edit. It reads only appended bytes, waits for complete lines (a record observed mid-write stays pending), restarts from byte 0 when the file is truncated or rotated, and polls every `--interval <ms>` (default 500).
 
 ## dry-run: verify config
 
@@ -349,9 +350,9 @@ After install, the dsh web settings panel gains a "Hooks" section (beside Genera
 
 - **Status badges**: plugin version, hook count, history count, plus live diagnostics (in-flight runs, recent failures)
 - **Manual tester**: pick an event (18 kinds) + reason/tool, and fill the "simulated fields" row with numeric context (`runningSubagents`, `durationMs`, usage in/out); "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks; the report clears when the inputs change
-- **Notify-channel tests**: fire a test notification at the webhook (optional Slack summary) / desktop channel and show the payload preview
+- **Notify-channel tests**: fire a test notification at the webhook (optional Slack summary) / desktop channel and show the payload preview; the Feishu channel is tested with the one-click test card in the Feishu section below
 - **Feishu connect**: scan-to-connect inside the panel — the QR code renders inline (with expiry countdown and a cancel button); after the scan the app is created, credentials + hook config are written, and the connected summary offers a one-click test card, an inline truncation-length editor (50–5000 chars, default 300, with a content preview), a re-connect flow, and a disconnect (optionally removing the Feishu hooks)
-- **Hook list / editor**: a read-only list of the current hooks (event/when/match/run/notify + timeout/retry fields) with one-click "copy YAML"; the "edit" mode turns it into a form editor whose changes are validated (regexes, run-notify exclusivity) and written back to `cordis.patch.yml` with an automatic backup
+- **Hook list / editor**: a read-only list of the current hooks (event/when/match/run/notify + timeout/retry fields) with one-click "copy YAML"; the "edit" mode turns it into a form editor whose changes are validated (regexes, run-notify exclusivity) and written back to `cordis.patch.yml` with an automatic backup. Each hook's action dropdown offers `run a command`, `notify webhook`, `notify desktop`, or `notify feishu` (using the credentials from the scan, no script needed)
 - **Execution-history timeline**: at the bottom of the card, **collapsed by default** (the toggle state persists in localStorage), refreshed every 5s. Expanded, it filters by **event / outcome / session** (filters persist in localStorage, with a "showing N of M" count and a clear button) and **exports the current view as JSONL** (same shape as the on-disk `history.jsonl`, file name stamped with local time); the panel fetches the latest 200 records and filters in the browser
 
 CLI/headless environments are unaffected: the browser half loads only in the web GUI and the core has no UI runtime dependencies.
@@ -509,7 +510,7 @@ Both options write the same files:
 | File | Purpose |
 | --- | --- |
 | `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret + your open_id as the notification target (0600, never committed); `result_max_chars` sets the card content truncation (default 300, editable in the Web GUI) |
-| `~/.dsh/dsh-hooks/notify-feishu.mjs` | stable copy of the notify script the hooks reference |
+| `~/.dsh/dsh-hooks/notify-feishu.mjs` | stable copy of the notify script the hooks reference (only needed by script-style hooks; not needed once you switch to the built-in `notify: { channel: 'feishu' }`) |
 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks block: `turn/end` (completed/error/aborted) + `approval/asked` + `agent/error` card hooks |
 
 Restart `dsh web` afterwards — you will get cards when turns finish, approvals are asked, or the agent errors.
@@ -518,7 +519,21 @@ Restart `dsh web` afterwards — you will get cards when turns finish, approvals
 
 ### Option 3: manual configuration
 
-Prefer wiring it by hand? See [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs) — a zero-dependency script that posts turn-completion / approval notices through the Feishu **app API** (works without a group custom bot). Configure it like:
+No script wanted — just hand-written config? Put `DSH_HOOKS_FEISHU_APP_ID` / `DSH_HOOKS_FEISHU_APP_SECRET` / `DSH_HOOKS_FEISHU_TO` in the process environment (never in config files) and declare the **built-in channel**:
+
+```yaml
+- id: dsh-hooks
+  name: dsh-hooks
+  config:
+    hooks:
+      - on: 'turn/end'
+        when: 'completed'
+        notify: { channel: 'feishu' }
+      - on: 'approval/asked'
+        notify: { channel: 'feishu' }
+```
+
+Prefer wiring a standalone script (reusable outside the plugin)? See [`examples/notify-feishu.mjs`](examples/notify-feishu.mjs) — a zero-dependency script that posts turn-completion / approval notices through the Feishu **app API** (works without a group custom bot). Configure it like:
 
 ```yaml
 - id: dsh-hooks
@@ -532,7 +547,7 @@ Prefer wiring it by hand? See [`examples/notify-feishu.mjs`](examples/notify-fei
         run: 'node D:/path/to/examples/notify-feishu.mjs --approval'
 ```
 
-with `DSH_HOOKS_FEISHU_APP_ID` / `DSH_HOOKS_FEISHU_APP_SECRET` / `DSH_HOOKS_FEISHU_TO` in the process environment (never in config files).
+Both forms read the same credentials and go through the same rendering pipeline; the built-in channel drops the script copy, while the script form stays reusable outside the plugin (e.g. called directly by other automation).
 
 ## Security
 
