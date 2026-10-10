@@ -133,28 +133,41 @@ export function writeHooksConfig(patchFile: string, hooks: HookWireSpec[]): Writ
 }
 
 /**
- * Drop every hook whose `run` references the given script (the stable
- * notify-feishu.mjs copy), used by the Feishu disconnect flow. Other
- * entries and config stay untouched.
+ * Drop every hook whose `run` references the given script (the legacy
+ * notify-feishu.mjs copy). Other entries and config stay untouched.
  */
 export function removeScriptHooks(patchFile: string, scriptMarker: string): void {
+  filterDshHooks(patchFile, (hook) => !(typeof hook.run === 'string' && hook.run.includes(scriptMarker)))
+}
+
+/**
+ * Drop every Feishu notification hook, in both shapes it has ever been written:
+ * the legacy `run: node …/notify-feishu.mjs` form and the built-in
+ * `notify: { channel: 'feishu' }` form the setup writes today. Used by the
+ * disconnect flow, which must not leave a hook behind that keeps posting to a
+ * deleted app.
+ */
+export function removeFeishuHooks(patchFile: string): void {
+  filterDshHooks(
+    patchFile,
+    (hook) => !(typeof hook.run === 'string' && hook.run.includes('notify-feishu.mjs')) && hook.notify?.channel !== 'feishu',
+  )
+}
+
+/**
+ * Rewrite the dsh-hooks entry's hook list with only the hooks `keep` accepts;
+ * writes a backup first and leaves everything else in the file untouched.
+ */
+function filterDshHooks(patchFile: string, keep: (hook: HookWireSpec) => boolean): void {
   if (!existsSync(patchFile)) return
   const existing = readFileSync(patchFile, 'utf8')
   const entries = parsePatchText(existing)
-  let changed = false
   for (const entry of entries) {
     if (entry === null || typeof entry !== 'object' || (entry as { id?: unknown }).id !== 'dsh-hooks') continue
     const config = (entry as { config?: { hooks?: HookWireSpec[] } }).config
     const hooks = Array.isArray(config?.hooks) ? config.hooks : []
-    const kept = hooks.filter((hook) => {
-      if (typeof hook.run !== 'string') return true
-      if (hook.run.includes(scriptMarker)) {
-        changed = true
-        return false
-      }
-      return true
-    })
-    if (changed) {
+    const kept = hooks.filter(keep)
+    if (kept.length !== hooks.length) {
       config!.hooks = kept
       const backupPath = backupPathFor(patchFile)
       writeFileSync(backupPath, existing, 'utf8')

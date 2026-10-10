@@ -1,4 +1,5 @@
 import type { registerApp } from '@larksuiteoapi/node-sdk';
+import type { HookWireSpec } from './patch-config.js';
 /** Feishu config dir: credentials + the stable copy of the notify script. */
 export declare const FEISHU_CONFIG_DIR: string;
 export declare const FEISHU_CONFIG_PATH: string;
@@ -13,7 +14,11 @@ export interface FeishuSetupPaths {
     configPath?: string;
     /** Profile patch file (default ~/.dsh/profiles/<profile>/cordis.patch.yml). */
     patchFile?: string;
-    /** Stable notify-script location the hooks reference. */
+    /**
+     * Legacy stable notify-script location. The setup no longer copies or
+     * references a script (hooks use the built-in `feishu` channel); kept so
+     * {@link stableScriptPath} callers and older tests still resolve.
+     */
     notifyScript?: string;
 }
 export interface FeishuQRCodeInfo {
@@ -51,33 +56,33 @@ export declare function patchPath(profile: string): string;
 /**
  * Render a script path for a generated hook command.
  *
- * These commands are written into a YAML **plain scalar**, where nothing is
- * unescaped: `JSON.stringify` used to emit `"C:\\Users\\…"`, which YAML keeps
- * verbatim, so the doubled separators only worked because Windows tolerates
- * repeated separators. Forward slashes are valid for Node on every platform and
- * need no escape processing; quoting stays for paths containing spaces.
+ * @deprecated The setup no longer generates `run:` commands at all — it writes
+ * the built-in `notify: { channel: 'feishu' }` hooks (see {@link setupHooks}),
+ * so no path has to be escaped into YAML. Kept for hand-written config helpers.
  */
 export declare function hookCommandPath(scriptPath: string): string;
-/** Which hooks the setup installs into the profile. */
-export declare function setupHooks(scriptPath: string): ({
-    on: string;
-    when: string;
-    run: string;
-    timeoutMs: number;
-} | {
-    when?: undefined;
-    on: string;
-    run: string;
-    timeoutMs: number;
-})[];
+/**
+ * Which hooks the setup installs into the profile: five built-in `feishu`
+ * channel notifications.
+ *
+ * The setup used to copy `notify-feishu.mjs` beside the credentials and write
+ * five `run: node <script>` hooks. Since the plugin can send those cards
+ * in-process through the very same rendering pipeline, nothing has to be copied
+ * and no script path can go stale — that copy is also what put a JSON-escaped
+ * `C:\\Users\\…` into a YAML plain scalar. The script form is still available
+ * for hand-written config (see `examples/notify-feishu.mjs`).
+ */
+export declare function setupHooks(): HookWireSpec[];
 /** Absolute path of the shipped notify script (works from both lib/ and src/). */
 export declare function notifyScriptPath(): string;
 /**
- * Resolve the stable notify-script location hooks should reference. The npx
- * cache (where the CLI often runs from) is ephemeral, so the setup copies the
- * zero-dependency script next to feishu-config.json:
- * ~/.dsh/dsh-hooks/notify-feishu.mjs. Re-copies on every setup so the stable
- * copy tracks the installed version.
+ * Legacy stable location of the notify script beside the credentials
+ * (`~/.dsh/dsh-hooks/notify-feishu.mjs`).
+ *
+ * The setup used to copy the script there and reference it from five
+ * `run: node <script>` hooks; it now installs the built-in `feishu` channel, so
+ * this path is only meaningful for hand-written config that still wires the
+ * script form. Kept exported for CLI parity (see `bin/dsh-hooks.mjs`).
  */
 export declare function stableScriptPath(paths?: FeishuSetupPaths): string;
 /**
@@ -96,9 +101,7 @@ export declare function writeConfig(configPath: string, { appId, appSecret, targ
  * existing dsh-hooks entries keep unrelated config and get their hooks
  * replaced with `setupHooks`; other entries stay untouched. Idempotent.
  */
-export declare function mergePatchYaml(existingText: string, { scriptPath }: {
-    scriptPath: string;
-}): string;
+export declare function mergePatchYaml(existingText: string): string;
 /**
  * Full setup flow: registerApp (QR scan creates the Feishu app), write
  * credentials + the stable notify script, merge the card hooks into the

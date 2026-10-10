@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
   patchTextWithHooks,
+  removeFeishuHooks,
   removeScriptHooks,
   validateHookWire,
   writeHooksConfig,
@@ -162,5 +163,47 @@ describe('removeScriptHooks', () => {
 
   it('is a no-op when the patch file does not exist', () => {
     expect(() => removeScriptHooks(join(tmp, 'missing.yml'), 'notify-feishu.mjs')).not.toThrow()
+  })
+})
+
+describe('removeFeishuHooks', () => {
+  it('drops both the script form and the built-in channel, leaving other hooks', () => {
+    const patchFile = join(tmp, 'cordis.patch.yml')
+    writeFileSync(
+      patchFile,
+      [
+        '- id: dsh-hooks',
+        '  config:',
+        '    hooks:',
+        "      - { on: 'turn/end', when: 'completed', run: 'node C:/x/notify-feishu.mjs' }",
+        "      - { on: 'turn/end', when: 'error', notify: { channel: 'feishu' } }",
+        "      - { on: 'approval/asked', notify: { channel: 'feishu' } }",
+        "      - { on: 'tool/call', run: 'echo keep' }",
+        "      - { on: 'turn/end', notify: { channel: 'webhook', url: 'https://x' } }",
+      ].join('\n'),
+      'utf8',
+    )
+    removeFeishuHooks(patchFile)
+    const saved = readFileSync(patchFile, 'utf8')
+    // A disconnect must not leave any hook that keeps posting to the deleted app.
+    expect(saved).not.toContain('notify-feishu.mjs')
+    expect(saved).not.toContain('channel: feishu')
+    expect(saved).toContain('echo keep')
+    expect(saved).toContain('channel: webhook')
+  })
+
+  it('leaves the file untouched when there is nothing to remove', () => {
+    const patchFile = join(tmp, 'cordis.patch.yml')
+    const original = ['- id: dsh-hooks', '  config:', '    hooks:', "      - { on: 'tool/call', run: 'echo keep' }"].join('\n')
+    writeFileSync(patchFile, original, 'utf8')
+    removeFeishuHooks(patchFile)
+    // No change means no rewrite and no backup spam.
+    expect(readFileSync(patchFile, 'utf8')).toBe(original)
+    const { readdirSync } = require('node:fs') as typeof import('node:fs')
+    expect(readdirSync(tmp).some((name) => name.includes('.bak-'))).toBe(false)
+  })
+
+  it('is a no-op when the patch file does not exist', () => {
+    expect(() => removeFeishuHooks(join(tmp, 'missing.yml'))).not.toThrow()
   })
 })

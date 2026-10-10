@@ -376,7 +376,7 @@ web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 `/ds
 | `/dsh-hooks/feishu/cancel` | POST | 取消进行中的扫码会话（中止 registerApp 等待） |
 | `/dsh-hooks/feishu/config` | POST | 更新卡片截断长度：`{"resultMaxChars":800}`（50–5000），即时生效，保留凭据 |
 | `/dsh-hooks/feishu/test` | POST | 用已存凭据发送测试卡片 |
-| `/dsh-hooks/feishu/disconnect` | POST | 断开连接：删除凭据文件，`removeHooks: true` 时一并移除 patch 中引用 notify-feishu.mjs 的 hooks（带备份） |
+| `/dsh-hooks/feishu/disconnect` | POST | 断开连接：删除凭据文件，`removeHooks: true` 时一并移除 patch 里的飞书通知 hooks（旧的 `run: …notify-feishu.mjs` 形式与内置通道形式都会移除，带备份） |
 
 所有访问模式下，POST 仍必须使用 `application/json`（防跨站表单 CSRF），且每个请求的 `Host`/`Origin` 主机名都要可信（见下方 [Host / Origin 限制](#配置-host--origin-限制防-dns-rebinding)）。同时 web profile 下会向 agent 注入一段 systemPrompt 公告，说明插件存在与协作方式。
 
@@ -471,23 +471,21 @@ services:
 
 ## 飞书通知示例
 
-两种接入方式任选：**Web GUI 扫码**（推荐，无需终端）或 **setup CLI**——扫码自动创建飞书应用；凭据写入 `~/.dsh/dsh-hooks/feishu-config.json`。
-
-有两种下发方式，**推荐内置通道**：
+两种接入方式任选：**Web GUI 扫码**（推荐，无需终端）或 **setup CLI**——扫码自动创建飞书应用，凭据写入 `~/.dsh/dsh-hooks/feishu-config.json`，并把这 5 条 hook 直接写成**内置通道**。
 
 ```yaml
-# 内置通道：凭据来自上面的扫码结果（或 DSH_HOOKS_FEISHU_* 环境变量），不需要任何脚本
+# 扫码/CLI 流程写入的形态：凭据来自扫码结果（或 DSH_HOOKS_FEISHU_* 环境变量），不需要任何脚本
 - on: 'turn/end'
   when: completed
   notify: { channel: 'feishu' }
 
-# 脚本方式（扫码流程目前仍写入这个形态，保留给需要独立脚本的场景）
+# 脚本方式：留给手动配置/需要在插件之外复用的场景（见下方「方式三」）
 - on: 'turn/end'
   when: completed
-  run: node "~/.dsh/dsh-hooks/notify-feishu.mjs"
+  run: node "examples/notify-feishu.mjs"
 ```
 
-内置通道与脚本走**同一条渲染管线**（同一份卡片呈现、同一份凭据解析、同样的截断长度设置），区别只是前者在插件进程内直接发送。要迁移：把 hook 的 `run: node …notify-feishu.mjs` 换成 `notify: { channel: 'feishu' }`，然后可以删掉那份脚本拷贝。注意内置通道不适用 `timeoutMs`（脚本同样不适用），重试语义与 webhook 一致（传输/接口失败重试，配置缺失不重试）。
+内置通道与脚本走**同一条渲染管线**（同一份卡片呈现、同一份凭据解析、同样的截断长度设置），区别只是前者在插件进程内直接发送、少一份脚本副本。升级提示：0.14.3 及更早的扫码流程会写 `run: node "~/.dsh/dsh-hooks/notify-feishu.mjs"` 与一份脚本副本，要迁移只需把 hook 换成 `notify: { channel: 'feishu' }`（`--approval` 参数本就是空操作，可直接去掉），之后那份拷贝即可删除。注意内置通道不适用 `timeoutMs`（脚本同样不适用），重试语义与 webhook 一致（传输/接口失败重试，配置缺失不重试）。
 
 ### 方式一：Web GUI 扫码
 
@@ -513,7 +511,7 @@ dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
 | 文件 | 用途 |
 | --- | --- |
 | `~/.dsh/dsh-hooks/feishu-config.json` | app id/secret 与你的 open_id（通知目标），权限 0600，严禁提交；`result_max_chars` 控制卡片内容截断长度（默认 300，可在 Web GUI 中修改） |
-| `~/.dsh/dsh-hooks/notify-feishu.mjs` | hook 引用的通知脚本稳定副本（仅脚本式 hook 需要；改用内置通道 `notify: { channel: 'feishu' }` 后不再需要） |
+| `~/.dsh/dsh-hooks/notify-feishu.mjs` | 历史遗留：0.14.3 及更早的扫码流程会写入这份脚本副本；现在扫码直接写内置通道，不再生成。若存在且仍被 hook 引用则继续可用 |
 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks 配置块：`turn/end`（completed/error/aborted）+ `approval/asked` + `agent/error` 卡片 hook |
 
 完成后重启 `dsh web`——回合结束、请求审批、agent 出错时就会收到卡片通知。
@@ -550,7 +548,7 @@ dsh-hooks feishu-test                  # 用已存凭据发送测试卡片验证
         run: 'node D:/path/to/examples/notify-feishu.mjs --approval'
 ```
 
-两种写法读同一份凭据、走同一条渲染管线；内置通道少一个脚本副本，脚本方式便于在插件之外复用（例如别的自动化直接调用）。
+两种写法读同一份凭据、走同一条渲染管线；扫码流程写入的是内置通道（不需要脚本），脚本方式便于在插件之外复用（例如别的自动化直接调用）。
 
 ## 安全
 

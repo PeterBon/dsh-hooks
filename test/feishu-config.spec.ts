@@ -120,23 +120,23 @@ describe('runFeishuSetup resultMaxChars', () => {
 })
 
 describe('generated hook commands', () => {
-  it('writes forward slashes, never JSON-escaped backslashes', () => {
-    // The commands land in a YAML plain scalar, where nothing is unescaped:
-    // `JSON.stringify` used to emit `"C:\\Users\\…"`, which only worked because
-    // Windows tolerates repeated separators.
-    expect(hookCommandPath('C:\\Users\\peter\\.dsh\\notify-feishu.mjs')).toBe('"C:/Users/peter/.dsh/notify-feishu.mjs"')
-    const hooks = setupHooks('C:\\Users\\peter\\.dsh\\dsh-hooks\\notify-feishu.mjs')
+  it('installs the built-in feishu channel, with no script and no command path', () => {
+    // The setup used to copy notify-feishu.mjs and write five `run: node <script>`
+    // hooks; the plugin now sends through the built-in channel, so no path has to
+    // be escaped into YAML at all (that copy is what produced `C:\\Users\\…`).
+    const hooks = setupHooks()
     expect(hooks).toHaveLength(5)
     for (const hook of hooks) {
-      expect(hook.run).toContain('C:/Users/peter/.dsh/dsh-hooks/notify-feishu.mjs')
-      // A literal double backslash would survive YAML verbatim.
-      expect(hook.run).not.toContain('\\\\')
+      expect(hook.notify).toEqual({ channel: 'feishu' })
+      expect(hook.run).toBeUndefined()
     }
-    expect(hooks[0]?.run).toBe('node "C:/Users/peter/.dsh/dsh-hooks/notify-feishu.mjs"')
-    expect(hooks[3]?.run).toBe('node "C:/Users/peter/.dsh/dsh-hooks/notify-feishu.mjs" --approval')
+    expect(hooks[0]?.on).toBe('turn/end')
+    expect(hooks[3]?.on).toBe('approval/asked')
   })
 
-  it('accepts a POSIX path unchanged', () => {
+  it('renders hand-written script paths with forward slashes', () => {
+    // Legacy helper, still used by config that wires the script by hand.
+    expect(hookCommandPath('C:\\Users\\peter\\.dsh\\notify-feishu.mjs')).toBe('"C:/Users/peter/.dsh/notify-feishu.mjs"')
     expect(hookCommandPath('/home/peter/.dsh/notify-feishu.mjs')).toBe('"/home/peter/.dsh/notify-feishu.mjs"')
   })
 })
