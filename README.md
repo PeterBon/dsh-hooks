@@ -289,7 +289,7 @@ The URL may also live in the dsh process environment as `DSH_HOOKS_WEBHOOK_URL` 
 
 ## Execution history
 
-Every hook trigger is recorded into an in-memory ring buffer (default 500 entries) and best-effort appended to `~/.dsh/dsh-hooks/history.jsonl` (0600) — for future UIs and debugging. The ring buffer seeds from the JSONL at startup and live-syncs new appends on every web-panel read (including appends from other dsh processes sharing the file, e.g. a task-board Host), so history survives restarts. Records never contain secrets (env vars never enter records):
+Every hook trigger is recorded into an in-memory ring buffer (default 500 entries) and best-effort appended to `~/.dsh/dsh-hooks/history.jsonl` (0600) — for future UIs and debugging. The ring buffer seeds from the **tail** of the JSONL at startup (never the whole file) and live-syncs new appends on every web-panel read (including appends from other dsh processes sharing the file, e.g. a task-board Host), so history survives restarts. Once the file passes 2 MB it is compacted atomically down to its newest stretch (the smaller of `tailBytes` and `maxBytes`). The one concurrency gap: if another process appends inside this process's sync→write window, a size delta can no longer describe what was ingested, so the buffer is rebuilt from the tail instead (that window is far larger than the ring, so no visible record is lost). Records never contain secrets (env vars never enter records):
 
 ```yaml
 - id: dsh-hooks

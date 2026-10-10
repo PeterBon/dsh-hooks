@@ -199,4 +199,20 @@ describe('disk retention', () => {
     }
     expect(readFileSync(file, 'utf8')).toContain('first')
   })
+
+  it('keeps the cursor consistent across its own and foreign appends', () => {
+    const file = join(tmp, 'history.jsonl')
+    const sink = createHistorySink({ path: file })
+    sink.record({ ...sample, event: 'own-1' })
+    // Another process appends, then we append again: the foreign record must be
+    // ingested in order, and our own records must not be duplicated.
+    appendFileSync(file, JSON.stringify({ ...sample, event: 'foreign', ts: 2 }) + '\n', 'utf8')
+    sink.record({ ...sample, event: 'own-2' })
+    sink.sync()
+    expect(sink.recent().map((r) => r.event)).toEqual(['own-1', 'foreign', 'own-2'])
+    expect(readFileSync(file, 'utf8').trim().split('\n')).toHaveLength(3)
+    // Re-syncing changes nothing (the cursor points at the file end).
+    sink.sync()
+    expect(sink.recent().map((r) => r.event)).toEqual(['own-1', 'foreign', 'own-2'])
+  })
 })

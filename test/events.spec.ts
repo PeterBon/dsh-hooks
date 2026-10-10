@@ -1,10 +1,11 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { HookSpec } from '../src/config.js'
 import {
   agentCreatedContext,
   agentErrorContext,
   agentStatusContext,
   approvalContext,
+  cachedSessionTitle,
   classifySessionEvent,
   clearSessionTracking,
   errorText,
@@ -833,5 +834,107 @@ describe('clearSessionTracking', () => {
     // Another session's pairing state is untouched.
     const keptEnd = classifySessionEvent(kept, sessionEvent('turn/end', { turn: 1, reason: { kind: 'completed' } }))
     expect(keptEnd?.durationMs).toBeTypeOf('number')
+  })
+})
+
+describe('session log accessor cost', () => {
+  /** A session exposing the 0.2 accessor, so log walks can be counted. */
+  function spiedSession(id: string, events: unknown[]) {
+    const snapshotEvents = vi.fn(() => events)
+    return { session: { id, header: { cwd: 'C:/tmp' }, snapshotEvents } as never, snapshotEvents }
+  }
+
+  it('resolves the session title once per session', () => {
+    const { session, snapshotEvents } = spiedSession('cache-title-1', [userMessage(1, '第一个提示')])
+    expect(cachedSessionTitle(session)).toBe('第一个提示')
+    expect(snapshotEvents).toHaveBeenCalledTimes(1)
+    // Later events reuse the cached name instead of re-walking the log.
+    expect(cachedSessionTitle(session)).toBe('第一个提示')
+    expect(snapshotEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it('caches a missing title too, instead of re-walking every event', () => {
+    const { session, snapshotEvents } = spiedSession('cache-title-2', [])
+    expect(cachedSessionTitle(session)).toBeUndefined()
+    expect(cachedSessionTitle(session)).toBeUndefined()
+    expect(snapshotEvents).toHaveBeenCalledTimes(1)
+  })
+
+  it('refreshes the cached title from a session/title event and drops it on dispose', () => {
+    const events: unknown[] = [userMessage(1, '旧标题')]
+    const { session } = spiedSession('cache-title-3', events)
+    expect(cachedSessionTitle(session)).toBe('旧标题')
+
+    const renamed = sessionEvent('session/title', { title: '新标题', messageSeqs: [1], source: { kind: 'user' } })
+    events.push(renamed)
+    classifySessionEvent(session, renamed as never)
+    expect(cachedSessionTitle(session)).toBe('新标题')
+
+    // A disposed session's cache is dropped: the next lookup re-reads the log.
+    clearSessionTracking(session)
+    events.push(sessionEvent('session/title', { title: '最新', messageSeqs: [1], source: { kind: 'user' } }))
+    expect(cachedSessionTitle(session)).toBe('最新')
+  })
+
+  it('walks the log once per turn for content and usage together', () => {    const events = [
+      {
+        type: 'assistant/message',
+        seq: 2,
+        time: 1,
+        data: {
+          turn: 3,
+          message: { role: 'assistant', content: [textBlock('完成')] },
+          usage: { inputTokens: 10, outputTokens: 5 },
+        },
+      },
+    ]
+    const { session, snapshotEvents } = spiedSession('digest-1', events)
+    cachedSessionTitle(session) // warm the name cache: one walk
+    expect(snapshotEvents).toHaveBeenCalledTimes(1)
+
+    const ctx = turnEndContext(session, 3, { kind: 'completed' } as never)
+    expect(ctx.content).toBe('完成')
+    expect(ctx.usageInputTokens).toBe(10)
+    expect(ctx.usageOutputTokens).toBe(5)
+    // Exactly one more walk (the digest), not one per derived fact.
+    expect(snapshotEvents).toHaveBeenCalledTimes(2)
+  })
+})
+
+describe('unpaired tool/result', () => {
+  it('recovers the tool name from the session log', () => {
+    // The call is in the log but was never classified (plugin applied
+    // mid-session / restart between call and result), so the pairing map is
+    // empty and only the log can answer.
+    const session = fakeSession('unpaired-1', [
+      sessionEvent('tool/call', { turn: 2, step: 1, callId: 'call-77', name: 'pwsh', arguments: '{}' }),
+    ])
+    const ctx = classifySessionEvent(
+      session,
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        callId: 'call-77',
+        message: { content: [textBlock('out')], source: { kind: 'tool', callId: 'call-77' } },
+      }),
+    )
+    expect(ctx).toMatchObject({ event: 'tool/result', tool: 'pwsh', callId: 'call-77' })
+    expect(ctx?.toolDurationMs).toBeUndefined()
+  })
+
+  it('leaves the name unknown when no call matches', () => {
+    const session = fakeSession('unpaired-2', [
+      sessionEvent('tool/call', { turn: 2, step: 1, callId: 'other', name: 'pwsh', arguments: '{}' }),
+    ])
+    const ctx = classifySessionEvent(
+      session,
+      sessionEvent('tool/result', {
+        turn: 2,
+        step: 1,
+        callId: 'call-78',
+        message: { content: [], source: { kind: 'tool', callId: 'call-78' } },
+      }),
+    )
+    expect(ctx?.tool).toBeUndefined()
   })
 })

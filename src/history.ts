@@ -183,47 +183,61 @@ export function createHistorySink(options: HistorySinkOptions = {}): HistorySink
     }
   }
 
-  /** Ingest every byte appended since the last read (own writes included). */
-  function sync(): void {
-    if (!enabled) return
+  /** Ingest the file bytes in `[from, to)` into the ring buffer. */
+  function ingestRange(from: number, to: number): void {
+    const deltaBytes = to - from
+    if (deltaBytes <= 0) return
+    const fd = openSync(file, 'r')
     try {
-      if (!existsSync(file)) return
+      const chunk = Buffer.allocUnsafe(deltaBytes)
+      let total = 0
+      while (total < deltaBytes) {
+        const n = readSync(fd, chunk, total, deltaBytes - total, from + total)
+        if (n <= 0) break
+        total += n
+      }
+      ingest(chunk.subarray(0, total).toString('utf8'))
+    } finally {
+      closeSync(fd)
+    }
+  }
+
+  /**
+   * Ingest every byte appended since the last read and return the synced size
+   * (undefined when persistence is off or the file is unreadable). Returning
+   * the size lets `record` verify its own write without another stat.
+   */
+  function syncToEnd(): number | undefined {
+    if (!enabled) return undefined
+    try {
+      if (!existsSync(file)) return undefined
       const size = statSync(file).size
-      if (size === syncedBytes) return
       if (size < syncedBytes) {
         // The file shrank (rotation/truncation): rebuild from its tail.
         rebuild()
-        return
+        return statSync(file).size
       }
-      const deltaBytes = size - syncedBytes
-      const fd = openSync(file, 'r')
-      try {
-        const chunk = Buffer.allocUnsafe(deltaBytes)
-        let total = 0
-        while (total < deltaBytes) {
-          const n = readSync(fd, chunk, total, deltaBytes - total, syncedBytes + total)
-          if (n <= 0) break
-          total += n
-        }
-        ingest(chunk.subarray(0, total).toString('utf8'))
-      } finally {
-        closeSync(fd)
+      if (size > syncedBytes) {
+        ingestRange(syncedBytes, size)
+        syncedBytes = size
       }
-      syncedBytes = size
+      return size
     } catch {
       // Sync is best-effort; the next call retries.
+      return undefined
     }
+  }
+
+  /** Ingest every byte appended since the last read (own writes included). */
+  function sync(): void {
+    syncToEnd()
   }
 
   function record(partial: Omit<HookRunRecord, 'ts'>): void {
     const entry: HookRunRecord = { ...partial, ts: Date.now() }
-    // Ingest other processes' appends BEFORE our own entry so the buffer
-    // stays in file order, and `syncedBytes` stays a true prefix of the
-    // file (otherwise our own advance would skip the foreign appends).
-    // Residual race: an append landing between this sync and our write below
-    // advances the cursor past it, so that record stays on disk but never
-    // enters the ring buffer until the next rebuild.
-    if (enabled) sync()
+    // Ingest other processes' appends BEFORE our own entry so the buffer stays
+    // in file order, and remember the size they left the file at.
+    const syncedSize = enabled ? syncToEnd() : undefined
     push(entry)
     if (!enabled) return
     try {
@@ -231,11 +245,22 @@ export function createHistorySink(options: HistorySinkOptions = {}): HistorySink
         mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
         dirReady = true
       }
+      const before = syncedSize ?? (existsSync(file) ? statSync(file).size : 0)
+      const line = JSON.stringify(entry) + '\n'
       // Create owner-only (mode applies at creation; an existing file keeps
       // its mode and is chmodded below).
-      appendFileSync(file, JSON.stringify(entry) + '\n', { encoding: 'utf8', mode: 0o600 })
+      appendFileSync(file, line, { encoding: 'utf8', mode: 0o600 })
       const size = statSync(file).size
-      syncedBytes = size
+      if (size === before + Buffer.byteLength(line, 'utf8')) {
+        // Our line is exactly where we expect it: the file is a true prefix.
+        syncedBytes = size
+      } else {
+        // Another process appended inside our write window, so a size delta can
+        // no longer say what we have ingested. Resync from the tail instead of
+        // advancing past records that never entered the buffer (the tail window
+        // is far larger than the ring, so nothing visible is lost).
+        rebuild()
+      }
       if (!chmodded) {
         try {
           chmodSync(file, 0o600)
