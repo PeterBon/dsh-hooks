@@ -417,6 +417,9 @@ export function HooksSettingsCard(_props: object): ReactNode {
       list.map((hook, i) => {
         if (i !== index) return hook
         if (channel === '') return { ...hook, notify: null, run: hook.run ?? '' }
+        // The feishu channel takes no url/slack: its credentials live in the
+        // config file written by the connect flow below.
+        if (channel === 'feishu') return { ...hook, notify: { channel: 'feishu' }, run: undefined }
         return {
           ...hook,
           notify: { channel: channel as 'webhook' | 'desktop', url: hook.notify?.url, slack: hook.notify?.slack },
@@ -867,6 +870,7 @@ export function HooksSettingsCard(_props: object): ReactNode {
                       <option value="">执行命令（run）</option>
                       <option value="webhook">通知 webhook</option>
                       <option value="desktop">通知 desktop</option>
+                      <option value="feishu">通知 feishu（用下方连接凭据）</option>
                     </select>
                   </label>
                 </div>

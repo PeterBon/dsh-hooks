@@ -83,7 +83,7 @@ export declare function describeHooks(hooks: readonly HookSpec[]): {
     } | undefined;
     run: string | undefined;
     notify: {
-        channel: "desktop" | "webhook";
+        channel: "desktop" | "feishu" | "webhook";
         url: string | undefined;
         slack: boolean | undefined;
     } | undefined;

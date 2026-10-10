@@ -75,14 +75,28 @@ export function patchPath(profile: string): string {
   return profilePatchFile(profile)
 }
 
+/**
+ * Render a script path for a generated hook command.
+ *
+ * These commands are written into a YAML **plain scalar**, where nothing is
+ * unescaped: `JSON.stringify` used to emit `"C:\\Users\\…"`, which YAML keeps
+ * verbatim, so the doubled separators only worked because Windows tolerates
+ * repeated separators. Forward slashes are valid for Node on every platform and
+ * need no escape processing; quoting stays for paths containing spaces.
+ */
+export function hookCommandPath(scriptPath: string): string {
+  return `"${scriptPath.replace(/\\/g, '/')}"`
+}
+
 /** Which hooks the setup installs into the profile. */
 export function setupHooks(scriptPath: string) {
+  const command = hookCommandPath(scriptPath)
   return [
-    { on: 'turn/end', when: 'completed', run: `node ${JSON.stringify(scriptPath)}`, timeoutMs: 30000 },
-    { on: 'turn/end', when: 'error', run: `node ${JSON.stringify(scriptPath)}`, timeoutMs: 30000 },
-    { on: 'turn/end', when: 'aborted', run: `node ${JSON.stringify(scriptPath)}`, timeoutMs: 30000 },
-    { on: 'approval/asked', run: `node ${JSON.stringify(scriptPath)} --approval`, timeoutMs: 30000 },
-    { on: 'agent/error', run: `node ${JSON.stringify(scriptPath)}`, timeoutMs: 30000 },
+    { on: 'turn/end', when: 'completed', run: `node ${command}`, timeoutMs: 30000 },
+    { on: 'turn/end', when: 'error', run: `node ${command}`, timeoutMs: 30000 },
+    { on: 'turn/end', when: 'aborted', run: `node ${command}`, timeoutMs: 30000 },
+    { on: 'approval/asked', run: `node ${command} --approval`, timeoutMs: 30000 },
+    { on: 'agent/error', run: `node ${command}`, timeoutMs: 30000 },
   ]
 }
 

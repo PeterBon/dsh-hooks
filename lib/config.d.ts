@@ -10,8 +10,14 @@ export type TurnEndReasonKind = (typeof TURN_END_REASONS)[number];
  * a hook declares exactly one of the two.
  */
 export interface NotifySpec {
-    /** Channel to send through. */
-    channel: 'webhook' | 'desktop';
+    /**
+     * Channel to send through. `feishu` needs no `url`: it reuses the credentials
+     * written by the QR setup flow (`~/.dsh/dsh-hooks/feishu-config.json`) or the
+     * `DSH_HOOKS_FEISHU_*` environment variables, and sends the same card the
+     * shipped `examples/notify-feishu.mjs` renders — in process, so no script
+     * copy and no `run:` hook is needed.
+     */
+    channel: 'webhook' | 'desktop' | 'feishu';
     /** webhook: the target URL (falls back to the `DSH_HOOKS_WEBHOOK_URL` env var). */
     url?: string;
     /** webhook: post a Slack-style `{ text }` one-line summary instead of the full context document. */

@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { describeHook, evaluateHooks, applyMockFields, loadHooks, MOCK_NUMERIC_FIELDS, mockContext, runDryRun } from '../src/dry-run.js'
+import { describeHook, drainHooks, describeOutcome, evaluateHooks, applyMockFields, loadHooks, MOCK_NUMERIC_FIELDS, mockContext, runDryRun } from '../src/dry-run.js'
 import type { HookSpec } from '../src/config.js'
 
 let tmp: string
@@ -165,8 +165,47 @@ describe('runDryRun', () => {
     expect(text).toContain('--execute')
   })
 
-  it('simulates numeric fields so count-based matches become reachable', async () => {
-    const file = writePatch([
+  it('waits for the hook and reports its real outcome with --execute', async () => {
+    // A tiny script keeps the command free of shell metacharacters, so the test
+    // exercises the real spawn on every platform.
+    const script = join(tmp, 'exits-zero.mjs')
+    writeFileSync(script, 'process.exit(0)\n')
+    const file = writePatch([{ on: 'turn/end', when: 'completed', run: `node "${script}"` }])
+    const lines: string[] = []
+    await runDryRun({
+      profile: 'web',
+      event: 'turn/end',
+      reason: 'completed',
+      execute: true,
+      paths: { patchFile: file },
+      print: (l) => lines.push(l),
+    })
+    const text = lines.join('\n')
+    // Reporting used to stop at "spawned" and exit on top of the child.
+    expect(text).toContain('exit-0')
+    expect(text).toContain('退出码 0')
+    expect(text).not.toContain('fire-and-forget')
+  })
+
+  it('surfaces a non-zero exit instead of implying success', async () => {
+    const script = join(tmp, 'exits-three.mjs')
+    writeFileSync(script, 'process.exit(3)\n')
+    const file = writePatch([{ on: 'turn/end', when: 'completed', run: `node "${script}"` }])
+    const lines: string[] = []
+    await runDryRun({
+      profile: 'web',
+      event: 'turn/end',
+      reason: 'completed',
+      execute: true,
+      paths: { patchFile: file },
+      print: (l) => lines.push(l),
+    })
+    const text = lines.join('\n')
+    expect(text).toContain('exit-nonzero')
+    expect(text).toContain('退出码 3')
+  })
+
+  it('simulates numeric fields so count-based matches become reachable', async () => {    const file = writePatch([
       { on: 'turn/end', match: { runningSubagents: '^0$' }, run: 'echo idle' },
       { on: 'turn/end', match: { runningSubagents: { gt: 0 } }, run: 'echo busy' },
     ])
@@ -248,5 +287,48 @@ describe('mockContext field presence', () => {
     for (const field of ['runningSubagents', 'durationMs', 'usageInputTokens', 'usageOutputTokens']) {
       expect(MOCK_NUMERIC_FIELDS).toContain(field)
     }
+  })
+})
+
+describe('drainHooks / describeOutcome', () => {
+  it('waits until nothing is in flight', async () => {
+    let inFlight = 2
+    const runner = { stats: () => ({ inFlight }) }
+    setTimeout(() => {
+      inFlight = 0
+    }, 40)
+    expect(await drainHooks(runner, 2000)).toBe(true)
+    expect(inFlight).toBe(0)
+  })
+
+  it('gives up at the deadline and reports that children are still running', async () => {
+    const runner = { stats: () => ({ inFlight: 1 }) }
+    expect(await drainHooks(runner, 60)).toBe(false)
+  })
+
+  it('formats a finished record in one line', () => {
+    expect(describeOutcome({ kind: 'run', event: 'turn/end', command: 'node x', outcome: 'exit-0', exitCode: 0, durationMs: 42 })).toBe(
+      'exit-0 · 退出码 0 · 42ms',
+    )
+    expect(
+      describeOutcome({
+        kind: 'run',
+        event: 'turn/end',
+        command: 'node x',
+        outcome: 'exit-nonzero',
+        exitCode: 3,
+        error: 'boom\n  second line',
+      }),
+    ).toBe('exit-nonzero · 退出码 3 · boom second line')
+    // A runaway stderr tail is truncated, not dumped.
+    const long = describeOutcome({
+      kind: 'run',
+      event: 'turn/end',
+      command: 'node x',
+      outcome: 'exit-nonzero',
+      error: 'x'.repeat(500),
+    })
+    expect(long.length).toBeLessThanOrEqual('exit-nonzero · '.length + 201)
+    expect(long.endsWith('…')).toBe(true)
   })
 })

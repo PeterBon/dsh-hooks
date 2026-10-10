@@ -76,7 +76,7 @@ Every hook field:
 | `when` | filter `turn/end` by end reason | all reasons |
 | `match` | field → regex or numeric comparison, all must match; fields are context keys (`tool` / `sessionName` / `sessionId` / `error` / `source` / `cwd` / `content` / `reason` / `turn` / `durationMs` / `toolDurationMs`, …), a field absent from the context never matches. Regexes test the string form; comparisons (`{ gt: 10000 }` or `'>10000'`, ops `gt` / `gte` / `lt` / `lte` / `eq`, combinable) apply only to numeric fields and never match non-numeric ones | no filter |
 | `run` | command spawned through the platform shell (exactly one of `run` / `notify`) | one of the two required |
-| `notify` | built-in notification (exactly one of `run` / `notify`): `channel: webhook` (HTTP JSON; omit `url` to use `DSH_HOOKS_WEBHOOK_URL`, `slack: true` for a one-line summary) or `channel: desktop` (platform balloon/toast) | one of the two required |
+| `notify` | built-in notification (exactly one of `run` / `notify`): `channel: webhook` (HTTP JSON; omit `url` to use `DSH_HOOKS_WEBHOOK_URL`, `slack: true` for a one-line summary), `channel: desktop` (platform balloon/toast), or `channel: feishu` (post the card straight from the plugin using the scan-flow credentials — **no external script**; see the Feishu section) | one of the two required |
 | `input` | `env` passes only the `DSH_HOOK_*` variables; `stdin` additionally writes the full context JSON to the command's stdin | `env` |
 | `timeoutMs` | per-run timeout (ms); the process tree is terminated on expiry. On the notify webhook channel it bounds **one request** (default 10000); the desktop channel is a local balloon whose script intentionally lives ~9 s, so it does not apply there | 10000 |
 | `retries` | retry count for non-zero exit codes (spawn failures and timeouts never retry) | 0 |
@@ -328,6 +328,8 @@ dsh-hooks dry-run turn/end --reason completed --profile web
 dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually run the matching hooks
 ```
 
+`--execute` **waits for the matching hooks to exit before returning** and reports each one's real result (`↳ … —— exit-0 · 退出码 0 · 998ms`; non-zero exits, timeouts and spawn failures are reported the same way, with an over-long stderr tail truncated). The wait is bounded at 60 s, after which it reports how many hooks are still running — so the command doubles as a "was the notification actually delivered" regression check. Omit `--execute` when you only want to know which hooks would fire.
+
 **Simulating numeric fields**: give count/timing/token fields a value to exercise numeric `match` filters:
 
 ```sh
@@ -465,7 +467,23 @@ If an allowlisted client still receives this error, confirm the variable reached
 
 ## Feishu notification example
 
-Two ways to connect — the **Web GUI scan** (recommended, no terminal) or the one-shot setup CLI. Both create the Feishu app via a QR-code scan and write the same hook config.
+Two ways to connect — the **Web GUI scan** (recommended, no terminal) or the one-shot setup CLI. Both create the Feishu app via a QR-code scan and write the credentials to `~/.dsh/dsh-hooks/feishu-config.json`.
+
+There are two ways to deliver, and the **built-in channel is the recommended one**:
+
+```yaml
+# Built-in channel: credentials come from the scan above (or DSH_HOOKS_FEISHU_* env vars); no script involved
+- on: 'turn/end'
+  when: completed
+  notify: { channel: 'feishu' }
+
+# Script form (what the scan flow still writes today; kept for setups that want a standalone script)
+- on: 'turn/end'
+  when: completed
+  run: node "~/.dsh/dsh-hooks/notify-feishu.mjs"
+```
+
+Both go through the **same rendering pipeline** — same card presentation, same credential resolution, same truncation setting — the only difference is that the built-in channel sends in-process. To migrate, replace `run: node …notify-feishu.mjs` with `notify: { channel: 'feishu' }` and delete the script copy. `timeoutMs` does not apply to this channel (it never applied to the script either); retries follow the webhook semantics (transport/API failures retry, missing configuration does not).
 
 ### Option 1: scan in the Web GUI
 

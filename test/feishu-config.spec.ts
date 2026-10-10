@@ -11,8 +11,10 @@ vi.mock('../examples/notify-feishu.mjs', () => ({
 import {
   deleteFeishuConfig,
   FEISHU_RESULT_MAX_CHARS_DEFAULT,
+  hookCommandPath,
   readFeishuSummary,
   runFeishuSetup,
+  setupHooks,
   updateFeishuResultMaxChars,
 } from '../src/feishu.js'
 
@@ -114,5 +116,27 @@ describe('runFeishuSetup resultMaxChars', () => {
     })
     expect(JSON.parse(readFileSync(configPath, 'utf8')).result_max_chars).toBe(800)
     expect(existsSync(patchFile)).toBe(true)
+  })
+})
+
+describe('generated hook commands', () => {
+  it('writes forward slashes, never JSON-escaped backslashes', () => {
+    // The commands land in a YAML plain scalar, where nothing is unescaped:
+    // `JSON.stringify` used to emit `"C:\\Users\\…"`, which only worked because
+    // Windows tolerates repeated separators.
+    expect(hookCommandPath('C:\\Users\\peter\\.dsh\\notify-feishu.mjs')).toBe('"C:/Users/peter/.dsh/notify-feishu.mjs"')
+    const hooks = setupHooks('C:\\Users\\peter\\.dsh\\dsh-hooks\\notify-feishu.mjs')
+    expect(hooks).toHaveLength(5)
+    for (const hook of hooks) {
+      expect(hook.run).toContain('C:/Users/peter/.dsh/dsh-hooks/notify-feishu.mjs')
+      // A literal double backslash would survive YAML verbatim.
+      expect(hook.run).not.toContain('\\\\')
+    }
+    expect(hooks[0]?.run).toBe('node "C:/Users/peter/.dsh/dsh-hooks/notify-feishu.mjs"')
+    expect(hooks[3]?.run).toBe('node "C:/Users/peter/.dsh/dsh-hooks/notify-feishu.mjs" --approval')
+  })
+
+  it('accepts a POSIX path unchanged', () => {
+    expect(hookCommandPath('/home/peter/.dsh/notify-feishu.mjs')).toBe('"/home/peter/.dsh/notify-feishu.mjs"')
   })
 })

@@ -1,5 +1,22 @@
 import { type HookSpec, type TurnEndReasonKind } from './config.js';
 import type { HookContext } from './context.js';
+import { type HookRunRecord } from './history.js';
+/**
+ * Wait until every spawned hook has exited, bounded by `timeoutMs`.
+ *
+ * The runner is fire-and-forget by design (it must never block the agent loop),
+ * but a manual `--execute` has nothing else to do and otherwise exits before
+ * its own children finish — which made the command useless as a delivery check:
+ * it could only report "spawned". Returns false when children are still running
+ * at the deadline.
+ */
+export declare function drainHooks(runner: {
+    stats: () => {
+        inFlight: number;
+    };
+}, timeoutMs?: number): Promise<boolean>;
+/** One-line human summary of a finished hook record. */
+export declare function describeOutcome(record: Omit<HookRunRecord, 'ts'>): string;
 /**
  * Profile patch file for a profile name.
  *

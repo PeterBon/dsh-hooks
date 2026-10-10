@@ -53,6 +53,11 @@ describe('validateHookWire', () => {
     expect(validateHookWire([{ on: 'turn/end', run: '  ', notify: null }])).toContain('必须且只能')
   })
 
+  it('accepts the built-in feishu channel and rejects unknown ones', () => {
+    expect(validateHookWire([{ on: 'turn/end', notify: { channel: 'feishu' } }])).toBeNull()
+    expect(validateHookWire([{ on: 'turn/end', notify: { channel: 'slack' as 'webhook' } }])).toContain('无效通知渠道')
+  })
+
   it('rejects negative numeric fields', () => {
     expect(validateHookWire([{ ...runHook, timeoutMs: -1 }])).toContain('timeoutMs')
     expect(validateHookWire([{ ...runHook, retries: Number.NaN }])).toContain('retries')

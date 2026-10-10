@@ -17,7 +17,7 @@ export interface HookWireSpec {
   when?: string
   match?: Record<string, string>
   run?: string
-  notify?: { channel: 'webhook' | 'desktop'; url?: string; slack?: boolean } | null
+  notify?: { channel: 'webhook' | 'desktop' | 'feishu'; url?: string; slack?: boolean } | null
   input?: 'env' | 'stdin'
   timeoutMs?: number
   retries?: number
@@ -68,7 +68,7 @@ export function validateHookWire(hooks: HookWireSpec[]): string | null {
     if (hasRun === hasNotify) {
       return `${label}：run 与 notify 必须且只能声明一个`
     }
-    if (hasNotify && hook.notify!.channel !== 'webhook' && hook.notify!.channel !== 'desktop') {
+    if (hasNotify && !['webhook', 'desktop', 'feishu'].includes(hook.notify!.channel)) {
       return `${label}：无效通知渠道 ${hook.notify!.channel}`
     }
     for (const key of ['timeoutMs', 'retries', 'retryDelayMs', 'maxConcurrent', 'debounceMs'] as const) {

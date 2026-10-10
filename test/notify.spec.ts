@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { fireNotify, sendDesktop, sendWebhook, summarizeContext, webhookPayload } from '../src/notify.js'
+import { fireNotify, sendDesktop, sendFeishu, sendWebhook, summarizeContext, webhookPayload } from '../src/notify.js'
 
 // Mock spawn so desktop notifications never open a real shell/UI in tests.
 vi.mock('node:child_process', () => {
@@ -8,9 +8,25 @@ vi.mock('node:child_process', () => {
   }
 })
 
+// The built-in feishu channel reuses the shipped example pipeline; mocking it
+// keeps credentials and card rendering out of the tests while still asserting
+// the wiring (env mapping, retry classification, history records).
+vi.mock('../examples/notify-feishu.mjs', () => ({
+  readEnv: vi.fn((env: Record<string, string | undefined>) => ({
+    event: env.DSH_HOOK_EVENT ?? '',
+    sessionId: env.DSH_HOOK_SESSION_ID ?? '',
+    sessionName: env.DSH_HOOK_SESSION_NAME ?? '',
+    appId: env.DSH_HOOKS_FEISHU_APP_ID,
+    to: env.DSH_HOOKS_FEISHU_TO,
+  })),
+  run: vi.fn(),
+}))
+
 import { spawn } from 'node:child_process'
+import { run as feishuRun } from '../examples/notify-feishu.mjs'
 
 const spawnMock = vi.mocked(spawn)
+const feishuRunMock = vi.mocked(feishuRun)
 
 function fakeChild() {
   const listeners: Record<string, Array<(v?: unknown) => void>> = {}
@@ -365,5 +381,71 @@ describe('fireNotify', () => {
     } finally {
       warnSpy.mockRestore()
     }
+  })
+})
+
+describe('sendFeishu', () => {
+  afterEach(() => {
+    feishuRunMock.mockReset()
+  })
+
+  it('reuses the example pipeline with the context mapped to env', async () => {
+    feishuRunMock.mockResolvedValue({ kind: 'card' })
+    const result = await sendFeishu(ctx)
+    expect(result).toEqual({ ok: true })
+    const [mapped, args, configPath] = feishuRunMock.mock.calls[0] as [
+      Record<string, unknown>,
+      string[],
+      string | undefined,
+    ]
+    expect(mapped).toMatchObject({ event: 'turn/end', sessionId: 'sess-1' })
+    expect(args).toEqual([])
+    // Undefined keeps the example's own default config path.
+    expect(configPath).toBeUndefined()
+  })
+
+  it('accepts a text result from the pipeline', async () => {
+    feishuRunMock.mockResolvedValue({ kind: 'text', text: 'hi' })
+    expect(await sendFeishu(ctx)).toEqual({ ok: true })
+  })
+
+  it('does not retry a configuration mistake', async () => {
+    feishuRunMock.mockRejectedValue(new Error('缺少 DSH_HOOKS_FEISHU_APP_ID / DSH_HOOKS_FEISHU_APP_SECRET'))
+    const result = await sendFeishu(ctx, { retries: 3, retryDelayMs: 1, log: () => {} })
+    expect(feishuRunMock).toHaveBeenCalledTimes(1)
+    expect(result.ok).toBe(false)
+    expect(result.error).toContain('飞书通知失败: 缺少 DSH_HOOKS_FEISHU_APP_ID')
+    expect(result.error).not.toContain('次尝试后仍失败')
+  })
+
+  it('retries a transport failure up to the configured count', async () => {
+    vi.useFakeTimers()
+    try {
+      feishuRunMock.mockRejectedValue(new Error('飞书接口请求失败: ECONNRESET'))
+      const pending = sendFeishu(ctx, { retries: 1, retryDelayMs: 50, log: () => {} })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(feishuRunMock).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(50)
+      const result = await pending
+      expect(feishuRunMock).toHaveBeenCalledTimes(2)
+      expect(result.error).toContain('（2 次尝试后仍失败）')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('never attempts a send once the plugin is unloading', async () => {
+    const controller = new AbortController()
+    controller.abort()
+    const result = await sendFeishu(ctx, { retries: 5, signal: controller.signal })
+    expect(result).toMatchObject({ ok: false, aborted: true })
+    expect(feishuRunMock).not.toHaveBeenCalled()
+  })
+
+  it('records the channel as notify:feishu in history', async () => {
+    feishuRunMock.mockResolvedValue({ kind: 'card' })
+    const records: Array<{ command: string; outcome: string }> = []
+    await fireNotify({ channel: 'feishu' }, ctx, (record) => records.push(record as { command: string; outcome: string }))
+    expect(records).toEqual([expect.objectContaining({ command: 'notify:feishu', outcome: 'sent' })])
   })
 })

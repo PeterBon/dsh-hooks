@@ -5,7 +5,7 @@ export interface HookWireSpec {
     match?: Record<string, string>;
     run?: string;
     notify?: {
-        channel: 'webhook' | 'desktop';
+        channel: 'webhook' | 'desktop' | 'feishu';
         url?: string;
         slack?: boolean;
     } | null;
