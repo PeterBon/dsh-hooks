@@ -163,19 +163,80 @@ export function sessionTitle(session: Session): string | undefined {
 }
 
 /**
+ * Resolved titles, keyed by session id. `baseContext` needs the session name on
+ * **every** classified event, and the lookup walks the whole log (on the host's
+ * fresh frozen copy) — per-event scanning is the hot path of a long session.
+ * A cached `undefined` is meaningful: "this session has no title yet", so the
+ * walk is not repeated on every following event.
+ */
+const sessionTitles = new Map<string, string | undefined>()
+
+/**
+ * Session title through {@link sessionTitles}: computed once per session, then
+ * refreshed by {@link rememberSessionTitle} from the events that can change it.
+ */
+export function cachedSessionTitle(session: Session): string | undefined {
+  const id = sessionKey(session)
+  if (sessionTitles.has(id)) return sessionTitles.get(id)
+  const title = sessionTitle(session)
+  sessionTitles.set(id, title)
+  return title
+}
+
+/** Refresh the cached title after an event that can set or rename it. */
+export function rememberSessionTitle(session: Session): void {
+  sessionTitles.set(sessionKey(session), sessionTitle(session))
+}
+
+/**
  * The turn's final assistant text, from the last `assistant/message` of that
  * turn. Capped so the environment snapshot stays small — card builders apply
  * their own display truncation.
  */
 export function turnContent(session: Session, turn: number): string | undefined {
-  let out: string | undefined
+  return turnDigest(session, turn).content
+}
+
+/** One turn's derived facts: final assistant text plus summed token usage. */
+export interface TurnDigest {
+  content?: string
+  usage?: UsageTotals
+}
+
+/**
+ * Walk the session log **once** for a turn and return both the final assistant
+ * text and the summed usage.
+ *
+ * `turnContent` and `turnUsage` used to walk the log separately, and the host's
+ * `snapshotEvents()` returns a fresh frozen copy per call, so every `turn/end`
+ * paid two full array copies plus two scans on a long session. Callers that
+ * need both go through here; the two single-purpose accessors remain as thin
+ * wrappers for compatibility.
+ */
+export function turnDigest(session: Session, turn: number): TurnDigest {
+  let content: string | undefined
+  let usage: UsageTotals | undefined
   for (const event of sessionEvents(session)) {
     if (event.type !== 'assistant/message') continue
     if (event.data.turn !== turn) continue
     const text = textOfBlocks(event.data.message.content)
-    if (text) out = text
+    if (text) content = text
+    const reported = event.data.usage as UsageLike | undefined
+    if (typeof reported?.inputTokens !== 'number') continue
+    usage ??= { inputTokens: 0, outputTokens: 0 }
+    usage.inputTokens += reported.inputTokens
+    usage.outputTokens += reported.outputTokens
+    if (typeof reported.cacheReadTokens === 'number') {
+      usage.cacheReadTokens = (usage.cacheReadTokens ?? 0) + reported.cacheReadTokens
+    }
+    if (typeof reported.cacheWriteTokens === 'number') {
+      usage.cacheWriteTokens = (usage.cacheWriteTokens ?? 0) + reported.cacheWriteTokens
+    }
+    if (typeof reported.reasoningTokens === 'number') {
+      usage.reasoningTokens = (usage.reasoningTokens ?? 0) + reported.reasoningTokens
+    }
   }
-  return out === undefined ? undefined : out.slice(0, 4000)
+  return { content: content === undefined ? undefined : content.slice(0, 4000), usage }
 }
 
 /** Structural token accounting (disjoint counts; cache fields optional). */
@@ -193,26 +254,7 @@ interface UsageLike {
  * any usage (adapters may omit it entirely).
  */
 export function turnUsage(session: Session, turn: number): UsageTotals | undefined {
-  let totals: UsageTotals | undefined
-  for (const event of sessionEvents(session)) {
-    if (event.type !== 'assistant/message') continue
-    if (event.data.turn !== turn) continue
-    const usage = event.data.usage as UsageLike | undefined
-    if (typeof usage?.inputTokens !== 'number') continue
-    totals ??= { inputTokens: 0, outputTokens: 0 }
-    totals.inputTokens += usage.inputTokens
-    totals.outputTokens += usage.outputTokens
-    if (typeof usage.cacheReadTokens === 'number') {
-      totals.cacheReadTokens = (totals.cacheReadTokens ?? 0) + usage.cacheReadTokens
-    }
-    if (typeof usage.cacheWriteTokens === 'number') {
-      totals.cacheWriteTokens = (totals.cacheWriteTokens ?? 0) + usage.cacheWriteTokens
-    }
-    if (typeof usage.reasoningTokens === 'number') {
-      totals.reasoningTokens = (totals.reasoningTokens ?? 0) + usage.reasoningTokens
-    }
-  }
-  return totals
+  return turnDigest(session, turn).usage
 }
 
 export function rememberTurnStart(session: Session): void {
@@ -243,6 +285,7 @@ export function clearTurnTracking(session: Session): void {
 export function clearSessionTracking(session: Session): void {
   const id = sessionKey(session)
   turnStarts.delete(id)
+  sessionTitles.delete(id)
   const prefix = `${id}\u0000`
   for (const key of callTools.keys()) if (key.startsWith(prefix)) callTools.delete(key)
   for (const key of approvalTools.keys()) if (key.startsWith(prefix)) approvalTools.delete(key)
@@ -366,7 +409,7 @@ function baseContext(session: Session, event: string): HookContext {
   return {
     event,
     sessionId: sessionKey(session),
-    sessionName: sessionTitle(session),
+    sessionName: cachedSessionTitle(session),
     cwd: session.header.cwd,
     ...sessionMeta(session),
     timestamp: new Date().toISOString(),
@@ -380,19 +423,19 @@ export function turnEndContext(session: Session, turn: number, reason: TurnEndRe
     const failure = (reason as { error?: { message?: unknown } }).error
     if (typeof failure?.message === 'string') error = failure.message
   }
-  const usage = turnUsage(session, turn)
+  const digest = turnDigest(session, turn)
   return {
     ...baseContext(session, 'turn/end'),
     turn,
     reason: kind,
     durationMs: takeDuration(session),
     error,
-    content: turnContent(session, turn),
-    usageInputTokens: usage?.inputTokens,
-    usageOutputTokens: usage?.outputTokens,
-    usageCacheReadTokens: usage?.cacheReadTokens,
-    usageCacheWriteTokens: usage?.cacheWriteTokens,
-    usageReasoningTokens: usage?.reasoningTokens,
+    content: digest.content,
+    usageInputTokens: digest.usage?.inputTokens,
+    usageOutputTokens: digest.usage?.outputTokens,
+    usageCacheReadTokens: digest.usage?.cacheReadTokens,
+    usageCacheWriteTokens: digest.usage?.cacheWriteTokens,
+    usageReasoningTokens: digest.usage?.reasoningTokens,
     // Default until index.ts fills the live count from the agents/subagents
     // services (0 = no subagent running under this session).
     runningSubagents: 0,
@@ -428,6 +471,28 @@ export function toolCallContext(
   }
 }
 
+/**
+ * Last-resort tool name for a `tool/result` whose `tool/call` was never paired
+ * (plugin applied mid-session, or a restart between call and result): the call
+ * event is already in the session log, so read it back.
+ *
+ * Bounded backward walk — a call precedes its result, so a live turn's match is
+ * near the end; the cap keeps a pathological log (or a stale callId) from
+ * costing a full scan on every result.
+ */
+export function toolNameFromLog(session: Session, callId: unknown): string | undefined {
+  const wanted = String(callId)
+  const events = sessionEvents(session)
+  const floor = Math.max(0, events.length - 500)
+  for (let i = events.length - 1; i >= floor; i--) {
+    const event = events[i] as unknown as { type?: unknown; data?: { callId?: unknown; name?: unknown } }
+    if (event.type !== 'tool/call') continue
+    if (String(event.data?.callId) !== wanted) continue
+    return typeof event.data?.name === 'string' ? event.data.name : undefined
+  }
+  return undefined
+}
+
 export function toolResultContext(
   session: Session,
   turn: number,
@@ -457,7 +522,9 @@ export function toolResultContext(
     ...baseContext(session, 'tool/result'),
     turn,
     step,
-    tool: paired?.tool,
+    // Fall back to the log when the live pairing is missing, so a result after
+    // a restart still carries its tool name (and `match: { tool: … }` works).
+    tool: paired?.tool ?? toolNameFromLog(session, callId),
     callId: String(callId),
     toolDurationMs: paired === undefined ? undefined : Date.now() - paired.startedAt,
     toolError,
@@ -686,12 +753,17 @@ export function classifySessionEvent(session: Session, event: SessionEvent): Hoo
       )
     }
     case 'user/message':
+      // The first direct prompt can become the session's derived title.
+      if (sessionTitles.get(sessionKey(session)) === undefined) rememberSessionTitle(session)
       return userMessageContext(session, event.data.content, event.data.source)
     case 'approval/asked':
       return approvalContext(session, event.data)
     case 'approval/decided':
       return approvalDecidedContext(session, event.data)
     case 'session/title':
+      // Refresh before building the context: this event carries the new name,
+      // and `baseContext` reads the cache.
+      rememberSessionTitle(session)
       return titleContext(session, event.data.title, event.data.source)
     default:
       return undefined

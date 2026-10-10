@@ -62,11 +62,34 @@ export interface AgentStatusPayload {
  */
 export declare function sessionTitle(session: Session): string | undefined;
 /**
+ * Session title through {@link sessionTitles}: computed once per session, then
+ * refreshed by {@link rememberSessionTitle} from the events that can change it.
+ */
+export declare function cachedSessionTitle(session: Session): string | undefined;
+/** Refresh the cached title after an event that can set or rename it. */
+export declare function rememberSessionTitle(session: Session): void;
+/**
  * The turn's final assistant text, from the last `assistant/message` of that
  * turn. Capped so the environment snapshot stays small — card builders apply
  * their own display truncation.
  */
 export declare function turnContent(session: Session, turn: number): string | undefined;
+/** One turn's derived facts: final assistant text plus summed token usage. */
+export interface TurnDigest {
+    content?: string;
+    usage?: UsageTotals;
+}
+/**
+ * Walk the session log **once** for a turn and return both the final assistant
+ * text and the summed usage.
+ *
+ * `turnContent` and `turnUsage` used to walk the log separately, and the host's
+ * `snapshotEvents()` returns a fresh frozen copy per call, so every `turn/end`
+ * paid two full array copies plus two scans on a long session. Callers that
+ * need both go through here; the two single-purpose accessors remain as thin
+ * wrappers for compatibility.
+ */
+export declare function turnDigest(session: Session, turn: number): TurnDigest;
 /**
  * Sum the `usage` of every `assistant/message` of a turn. Steps without
  * reported accounting are skipped; returns undefined when no step reported
@@ -102,6 +125,16 @@ export declare function turnEndContext(session: Session, turn: number, reason: T
 export declare function turnStartContext(session: Session, turn: number): HookContext;
 export declare function stepEndContext(session: Session, turn: number, step: number): HookContext;
 export declare function toolCallContext(session: Session, turn: number, step: number, callId: unknown, name: unknown, args: unknown): HookContext;
+/**
+ * Last-resort tool name for a `tool/result` whose `tool/call` was never paired
+ * (plugin applied mid-session, or a restart between call and result): the call
+ * event is already in the session log, so read it back.
+ *
+ * Bounded backward walk — a call precedes its result, so a live turn's match is
+ * near the end; the cap keeps a pathological log (or a stale callId) from
+ * costing a full scan on every result.
+ */
+export declare function toolNameFromLog(session: Session, callId: unknown): string | undefined;
 export declare function toolResultContext(session: Session, turn: number, step: number, callId: unknown, message: {
     content?: readonly {
         type?: unknown;
