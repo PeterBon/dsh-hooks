@@ -48,6 +48,16 @@ export interface FeishuSetupResult {
  * second traversal route beside `patchFilePath`.
  */
 export declare function patchPath(profile: string): string;
+/**
+ * Render a script path for a generated hook command.
+ *
+ * These commands are written into a YAML **plain scalar**, where nothing is
+ * unescaped: `JSON.stringify` used to emit `"C:\\Users\\…"`, which YAML keeps
+ * verbatim, so the doubled separators only worked because Windows tolerates
+ * repeated separators. Forward slashes are valid for Node on every platform and
+ * need no escape processing; quoting stays for paths containing spaces.
+ */
+export declare function hookCommandPath(scriptPath: string): string;
 /** Which hooks the setup installs into the profile. */
 export declare function setupHooks(scriptPath: string): ({
     on: string;

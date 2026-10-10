@@ -8,11 +8,43 @@ import YAML from 'yaml'
 import { Config, type HookSpec, type TurnEndReasonKind } from './config.js'
 import { matchFilters } from './events.js'
 import type { HookContext } from './context.js'
-import { DEFAULT_HISTORY_PATH } from './history.js'
+import { DEFAULT_HISTORY_PATH, type HookRunRecord } from './history.js'
 import { profilePatchFile } from './profile-path.js'
 import { localDayKey } from './usage.js'
 import { createHookRunner } from './runner.js'
 import { fireNotify } from './notify.js'
+
+/**
+ * Wait until every spawned hook has exited, bounded by `timeoutMs`.
+ *
+ * The runner is fire-and-forget by design (it must never block the agent loop),
+ * but a manual `--execute` has nothing else to do and otherwise exits before
+ * its own children finish — which made the command useless as a delivery check:
+ * it could only report "spawned". Returns false when children are still running
+ * at the deadline.
+ */
+export async function drainHooks(
+  runner: { stats: () => { inFlight: number } },
+  timeoutMs = 60000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (runner.stats().inFlight > 0 && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  return runner.stats().inFlight === 0
+}
+
+/** One-line human summary of a finished hook record. */
+export function describeOutcome(record: Omit<HookRunRecord, 'ts'>): string {
+  const parts: string[] = [record.outcome]
+  if (record.exitCode !== undefined) parts.push(`退出码 ${record.exitCode}`)
+  if (record.durationMs !== undefined) parts.push(`${record.durationMs}ms`)
+  if (record.error !== undefined && record.error !== '') {
+    const oneLine = record.error.replace(/\s+/g, ' ').trim()
+    parts.push(oneLine.length > 200 ? `${oneLine.slice(0, 200)}…` : oneLine)
+  }
+  return parts.join(' · ')
+}
 
 /**
  * Profile patch file for a profile name.
@@ -271,19 +303,39 @@ export async function runDryRun(options: DryRunOptions): Promise<{ matched: numb
     if (matched.length === 0) {
       print('没有匹配的 hook 可执行')
     }
-    const runner = createHookRunner((line) => print(`  ${line}`))
+    // Terminal records, so the command can report what actually happened: the
+    // runner reports each child's exit code once it exits.
+    const finished: Array<Omit<HookRunRecord, 'ts'>> = []
+    const runner = createHookRunner(
+      (line) => print(`  ${line}`),
+      (record) => {
+        if (record.outcome !== 'spawned') finished.push(record)
+      },
+    )
+    let spawned = 0
     for (const line of matched) {
       const hook = hooks[line.index - 1]
       if (hook.run) {
         print(`▶ 执行 [${line.index}] ${describeHook(hook)}`)
         const outcome = runner.run(hook, ctx)
-        if (!outcome.ok) print(`  ✗ ${outcome.reason}${outcome.detail ? `: ${outcome.detail}` : ''}`)
+        if (outcome.ok) spawned += 1
+        else print(`  ✗ ${outcome.reason}${outcome.detail ? `: ${outcome.detail}` : ''}`)
       } else if (hook.notify) {
         print(`▶ 发送 [${line.index}] notify:${hook.notify.channel}`)
         await fireNotify(hook.notify, ctx, undefined, { retries: hook.retries, retryDelayMs: hook.retryDelayMs })
       }
     }
-    print('（run 命令 fire-and-forget：执行结果见 dsh 日志）')
+    if (spawned > 0) {
+      // Wait for the children instead of exiting on top of them; without this
+      // the report could only ever say "spawned" and never "delivered".
+      const drained = await drainHooks(runner)
+      for (const record of finished) {
+        print(`  ↳ ${record.command} —— ${describeOutcome(record)}`)
+      }
+      if (!drained) {
+        print(`  ⚠ 等待超时：仍有 ${runner.stats().inFlight} 个 hook 在运行（本轮结果未包含它们）`)
+      }
+    }
   } else if (matched.length > 0) {
     print(`共 ${matched.length} 个 hook 会触发。加 --execute 实际执行（真实副作用！）`)
   }

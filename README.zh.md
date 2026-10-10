@@ -311,6 +311,8 @@ dsh-hooks dry-run turn/end --reason completed --profile web
 dsh-hooks dry-run tool/call --tool ssh_exec --execute   # 端到端真跑匹配的 hook
 ```
 
+`--execute` 会**等到匹配的 hook 子进程结束再退出**，并在报告里打印每个 hook 的真实结果（`↳ … —— exit-0 · 退出码 0 · 998ms`，非零退出、超时、spawn 失败同样如实打印，stderr 超长会截断）；等待上限 60 秒，超时会提示仍在运行的 hook 数。这样它可以直接当「通知是否真的送达」的回归工具——如果只想知道会不会触发，不要加 `--execute`。
+
 **模拟数值字段**：数字类上下文（`runningSubagents`、`durationMs`、`toolDurationMs`、`usage*`…）可以直接给定值，用来验证基于数值的 `match`：
 
 ```sh

@@ -328,6 +328,8 @@ dsh-hooks dry-run turn/end --reason completed --profile web
 dsh-hooks dry-run tool/call --tool ssh_exec --execute   # end-to-end: actually run the matching hooks
 ```
 
+`--execute` **waits for the matching hooks to exit before returning** and reports each one's real result (`↳ … —— exit-0 · 退出码 0 · 998ms`; non-zero exits, timeouts and spawn failures are reported the same way, with an over-long stderr tail truncated). The wait is bounded at 60 s, after which it reports how many hooks are still running — so the command doubles as a "was the notification actually delivered" regression check. Omit `--execute` when you only want to know which hooks would fire.
+
 **Simulating numeric fields**: give count/timing/token fields a value to exercise numeric `match` filters:
 
 ```sh
