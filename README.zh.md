@@ -76,7 +76,7 @@ dsh plugin --profile web add github:PeterBon/dsh-hooks
 | `when` | 对 `turn/end` 按结束原因过滤 | 全部原因 |
 | `match` | 字段 → 正则或数值比较，全部匹配才触发；字段为上下文键（`tool`/`sessionName`/`sessionId`/`error`/`source`/`cwd`/`content`/`reason`/`turn`/`durationMs`/`toolDurationMs`…），上下文中不存在的字段视为不匹配。正则匹配字段的字符串表示；数值比较（`{ gt: 10000 }` 或 `'>10000'`，支持 `gt`/`gte`/`lt`/`lte`/`eq` 组合）只对数字字段生效，非数字字段上的比较永不匹配 | 不过滤 |
 | `run` | 通过系统 shell 执行的命令（与 `notify` 二选一） | 二选一必填 |
-| `notify` | 内置通知（与 `run` 二选一）：`channel: webhook`（HTTP JSON，`url` 可省略用 `DSH_HOOKS_WEBHOOK_URL`，`slack: true` 换单行摘要）或 `channel: desktop`（系统气泡/toast） | 二选一必填 |
+| `notify` | 内置通知（与 `run` 二选一）：`channel: webhook`（HTTP JSON，`url` 可省略用 `DSH_HOOKS_WEBHOOK_URL`，`slack: true` 换单行摘要）、`channel: desktop`（系统气泡/toast）或 `channel: feishu`（用扫码流程写入的凭据直接发飞书卡片，**无需外部脚本**；见「飞书通知」一节） | 二选一必填 |
 | `input` | `env` 只传 `DSH_HOOK_*` 环境变量；`stdin` 额外把完整上下文 JSON 写入命令标准输入 | `env` |
 | `timeoutMs` | 单次执行超时（毫秒），超时终止进程树；notify 的 webhook 通道用它作为**单次请求**超时（默认 10000），桌面通道是本地气泡（脚本本身要显示约 9 秒）故不适用 | 10000 |
 | `retries` | 非零退出码的重试次数（spawn 失败与超时不重试） | 0 |
@@ -468,7 +468,23 @@ URL 也可放在 dsh 进程环境的 `DSH_HOOKS_WEBHOOK_URL`（不要写进配�
 
 ## 飞书通知示例
 
-两种接入方式任选：**Web GUI 扫码**（推荐，无需终端）或 **setup CLI**——扫码自动创建飞书应用并写好全部 hook 配置。
+两种接入方式任选：**Web GUI 扫码**（推荐，无需终端）或 **setup CLI**——扫码自动创建飞书应用；凭据写入 `~/.dsh/dsh-hooks/feishu-config.json`。
+
+有两种下发方式，**推荐内置通道**：
+
+```yaml
+# 内置通道：凭据来自上面的扫码结果（或 DSH_HOOKS_FEISHU_* 环境变量），不需要任何脚本
+- on: 'turn/end'
+  when: completed
+  notify: { channel: 'feishu' }
+
+# 脚本方式（扫码流程目前仍写入这个形态，保留给需要独立脚本的场景）
+- on: 'turn/end'
+  when: completed
+  run: node "~/.dsh/dsh-hooks/notify-feishu.mjs"
+```
+
+内置通道与脚本走**同一条渲染管线**（同一份卡片呈现、同一份凭据解析、同样的截断长度设置），区别只是前者在插件进程内直接发送。要迁移：把 hook 的 `run: node …notify-feishu.mjs` 换成 `notify: { channel: 'feishu' }`，然后可以删掉那份脚本拷贝。注意内置通道不适用 `timeoutMs`（脚本同样不适用），重试语义与 webhook 一致（传输/接口失败重试，配置缺失不重试）。
 
 ### 方式一：Web GUI 扫码
 

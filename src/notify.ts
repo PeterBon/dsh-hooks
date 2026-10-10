@@ -10,6 +10,7 @@ import { eventLabel } from './context.js'
 import type { NotifySpec } from './config.js'
 import type { HookRunRecord } from './history.js'
 import { DEFAULT_RETRY_DELAY_MS, retryDelayFor } from './runner.js'
+import { isPermanentFeishuError, sendFeishuOnce } from './feishu-notify.js'
 
 export interface NotifyResult {
   ok: boolean
@@ -146,6 +147,53 @@ export function webhookPayload(ctx: HookContext): Record<string, unknown> {
  * timeout) and HTTP 408/429/5xx. The URL comes from `spec.url` or the
  * `DSH_HOOKS_WEBHOOK_URL` environment variable.
  */
+/** One attempt's verdict, as consumed by {@link attemptWithRetry}. */
+export type NotifyAttempt = { ok: true } | { ok: false; failure: string; retryable: boolean }
+
+/**
+ * Shared attempt loop for the built-in channels: `retries` counts the attempts
+ * AFTER the first one (total `1 + retries`, matching the run channel), the
+ * delay doubles per attempt up to {@link MAX_RETRY_DELAY_MS}, and an abort
+ * (plugin teardown) stops immediately without being reported as a delivery
+ * failure.
+ */
+export async function attemptWithRetry(
+  attempt: () => Promise<NotifyAttempt>,
+  retry: NotifyRetryOptions,
+  label: () => string,
+): Promise<NotifyResult> {
+  const retries = Math.max(0, retry.retries ?? 0)
+  const baseDelay = Math.max(0, retry.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
+  const signal = retry.signal
+  const log = retry.log ?? ((line: string) => console.warn(line))
+  // Read through a call: TypeScript narrows `signal.aborted` after the first
+  // check and keeps that narrowing across `await`, which would flag the later
+  // checks as dead comparisons.
+  const aborted = (): boolean => signal?.aborted === true
+  for (let attemptNumber = 0; ; attemptNumber++) {
+    if (aborted()) return { ok: false, aborted: true, error: '插件已卸载，通知重试已中止' }
+    let outcome: NotifyAttempt
+    try {
+      outcome = await attempt()
+    } catch (error) {
+      if (aborted()) return { ok: false, aborted: true, error: '插件已卸载，通知重试已中止' }
+      outcome = { ok: false, failure: error instanceof Error ? error.message : String(error), retryable: true }
+    }
+    if (outcome.ok) return { ok: true }
+    const attempts = attemptNumber + 1
+    if (!outcome.retryable || attempts > retries) {
+      return { ok: false, error: attempts > 1 ? `${outcome.failure}（${attempts} 次尝试后仍失败）` : outcome.failure }
+    }
+    const delay = retryDelayFor(baseDelay, attemptNumber)
+    log(`[dsh-hooks] 通知发送失败（${outcome.failure}），${delay}ms 后重试（${attempts}/${retries}）：${label()}`)
+    await sleep(delay, signal)
+  }
+}
+
+/**
+ * HTTP webhook channel: POST a JSON document (or a Slack-style `{ text }`
+ * summary) to the configured URL.
+ */
 export async function sendWebhook(
   spec: NotifySpec,
   ctx: HookContext,
@@ -155,14 +203,8 @@ export async function sendWebhook(
   const url = spec.url || env.DSH_HOOKS_WEBHOOK_URL
   if (!url) return { ok: false, error: '缺少 webhook URL（notify.url 或 DSH_HOOKS_WEBHOOK_URL）' }
   const body = spec.slack ? { text: summarizeContext(ctx) } : webhookPayload(ctx)
-  const retries = Math.max(0, retry.retries ?? 0)
-  const baseDelay = Math.max(0, retry.retryDelayMs ?? DEFAULT_RETRY_DELAY_MS)
   const timeoutMs = retry.timeoutMs !== undefined && retry.timeoutMs > 0 ? retry.timeoutMs : NOTIFY_TIMEOUT_MS
   const signal = retry.signal
-  const log = retry.log ?? ((line: string) => console.warn(line))
-  // Read through a call: TypeScript narrows `signal.aborted` after the first
-  // check and keeps that narrowing across `await`, which would flag the later
-  // checks as dead comparisons.
   const aborted = (): boolean => signal?.aborted === true
   const attempt = async (): Promise<Response> => {
     const controller = new AbortController()
@@ -184,35 +226,53 @@ export async function sendWebhook(
   }
   // Attempt loop: `retries` counts the attempts AFTER the first one, so the
   // total is `1 + retries` — identical to the run channel's semantics.
-  for (let attemptNumber = 0; ; attemptNumber++) {
-    if (aborted()) {
-      return { ok: false, aborted: true, error: '插件已卸载，通知重试已中止' }
-    }
-    let failure: string
-    let retryable: boolean
-    try {
-      const response = await attempt()
-      if (response.ok) return { ok: true }
-      failure = `webhook 响应 HTTP ${response.status}`
-      retryable = isRetryableStatus(response.status)
-    } catch (error) {
-      // An abort here is either the per-attempt timeout (retryable) or the
-      // plugin unloading (terminal — stop, do not report a delivery failure).
-      if (aborted()) {
-        return { ok: false, aborted: true, error: '插件已卸载，通知重试已中止' }
+  return attemptWithRetry(
+    async () => {
+      let response: Response
+      try {
+        response = await attempt()
+      } catch (error) {
+        // An abort here is either the per-attempt timeout (retryable) or the
+        // plugin unloading (the loop turns it into a terminal abort).
+        return {
+          ok: false,
+          failure: `webhook 请求失败: ${error instanceof Error ? error.message : String(error)}`,
+          retryable: true,
+        }
       }
-      failure = `webhook 请求失败: ${error instanceof Error ? error.message : String(error)}`
-      // Transport failures are always worth another attempt.
-      retryable = true
-    }
-    const attempts = attemptNumber + 1
-    if (!retryable || attempts > retries) {
-      return { ok: false, error: attempts > 1 ? `${failure}（${attempts} 次尝试后仍失败）` : failure }
-    }
-    const delay = retryDelayFor(baseDelay, attemptNumber)
-    log(`[dsh-hooks] 通知发送失败（${failure}），${delay}ms 后重试（${attempts}/${retries}）：${eventLabel(ctx)}`)
-    await sleep(delay, signal)
-  }
+      if (response.ok) return { ok: true }
+      return { ok: false, failure: `webhook 响应 HTTP ${response.status}`, retryable: isRetryableStatus(response.status) }
+    },
+    retry,
+    () => eventLabel(ctx),
+  )
+}
+
+/**
+ * Built-in Feishu channel: send the configured card for this hook context.
+ *
+ * Credentials come from the QR setup flow's config file or `DSH_HOOKS_FEISHU_*`
+ * variables; a configuration mistake is permanent (no retry), while transport
+ * and API failures follow the hook's retry options like the webhook channel.
+ */
+export async function sendFeishu(
+  ctx: HookContext,
+  retry: NotifyRetryOptions = {},
+  configPath?: string,
+): Promise<NotifyResult> {
+  return attemptWithRetry(
+    async () => {
+      try {
+        await sendFeishuOnce(ctx, configPath)
+        return { ok: true }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        return { ok: false, failure: `飞书通知失败: ${message}`, retryable: !isPermanentFeishuError(message) }
+      }
+    },
+    retry,
+    () => eventLabel(ctx),
+  )
 }
 
 /**
@@ -293,7 +353,12 @@ export async function fireNotify(
   retry: NotifyRetryOptions = {},
 ): Promise<NotifyResult> {
   const startedAt = Date.now()
-  const result = spec.channel === 'webhook' ? await sendWebhook(spec, ctx, process.env, retry) : await sendDesktop(spec, ctx)
+  const result =
+    spec.channel === 'webhook'
+      ? await sendWebhook(spec, ctx, process.env, retry)
+      : spec.channel === 'feishu'
+        ? await sendFeishu(ctx, retry)
+        : await sendDesktop(spec, ctx)
   if (result.aborted === true) {
     // Teardown, not a delivery failure: history records it as skipped and no
     // failure warning is logged (an unload is not the endpoint's fault).

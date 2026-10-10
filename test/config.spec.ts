@@ -122,6 +122,12 @@ describe('Config schema', () => {
     expect(result.hooks?.[0]?.notify).toMatchObject({ channel: 'desktop', slack: false })
   })
 
+  it('accepts the built-in feishu notification channel', () => {
+    const result = Config({ hooks: [{ on: 'turn/end', notify: { channel: 'feishu' } }] })
+    expect(result.hooks?.[0]?.notify).toMatchObject({ channel: 'feishu' })
+    expect(result.hooks?.[0]?.run).toBeUndefined()
+  })
+
   it('rejects unknown notify channels', () => {
     expect(() =>
       Config({ hooks: [{ on: 'turn/end', notify: { channel: 'telegram' as never } }] }),

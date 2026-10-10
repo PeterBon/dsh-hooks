@@ -12,7 +12,7 @@ export interface HookDescriptor {
   when?: string
   match?: Record<string, string>
   run?: string
-  notify?: { channel: 'webhook' | 'desktop'; url?: string; slack?: boolean }
+  notify?: { channel: 'webhook' | 'desktop' | 'feishu'; url?: string; slack?: boolean }
   input?: 'env' | 'stdin'
   timeoutMs?: number
   retries?: number
@@ -29,7 +29,7 @@ export interface HookWireSpec {
   when?: string
   match?: Record<string, string>
   run?: string
-  notify?: { channel: 'webhook' | 'desktop'; url?: string; slack?: boolean } | null
+  notify?: { channel: 'webhook' | 'desktop' | 'feishu'; url?: string; slack?: boolean } | null
   input?: 'env' | 'stdin'
   timeoutMs?: number
   retries?: number

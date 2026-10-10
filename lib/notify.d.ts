@@ -49,7 +49,35 @@ export declare function webhookPayload(ctx: HookContext): Record<string, unknown
  * timeout) and HTTP 408/429/5xx. The URL comes from `spec.url` or the
  * `DSH_HOOKS_WEBHOOK_URL` environment variable.
  */
+/** One attempt's verdict, as consumed by {@link attemptWithRetry}. */
+export type NotifyAttempt = {
+    ok: true;
+} | {
+    ok: false;
+    failure: string;
+    retryable: boolean;
+};
+/**
+ * Shared attempt loop for the built-in channels: `retries` counts the attempts
+ * AFTER the first one (total `1 + retries`, matching the run channel), the
+ * delay doubles per attempt up to {@link MAX_RETRY_DELAY_MS}, and an abort
+ * (plugin teardown) stops immediately without being reported as a delivery
+ * failure.
+ */
+export declare function attemptWithRetry(attempt: () => Promise<NotifyAttempt>, retry: NotifyRetryOptions, label: () => string): Promise<NotifyResult>;
+/**
+ * HTTP webhook channel: POST a JSON document (or a Slack-style `{ text }`
+ * summary) to the configured URL.
+ */
 export declare function sendWebhook(spec: NotifySpec, ctx: HookContext, env?: NodeJS.ProcessEnv, retry?: NotifyRetryOptions): Promise<NotifyResult>;
+/**
+ * Built-in Feishu channel: send the configured card for this hook context.
+ *
+ * Credentials come from the QR setup flow's config file or `DSH_HOOKS_FEISHU_*`
+ * variables; a configuration mistake is permanent (no retry), while transport
+ * and API failures follow the hook's retry options like the webhook channel.
+ */
+export declare function sendFeishu(ctx: HookContext, retry?: NotifyRetryOptions, configPath?: string): Promise<NotifyResult>;
 /**
  * Desktop balloon/toast notification. The summary travels through an
  * environment variable (Windows PowerShell) or argv (macOS/Linux), never

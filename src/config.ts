@@ -46,8 +46,14 @@ export type TurnEndReasonKind = (typeof TURN_END_REASONS)[number]
  * a hook declares exactly one of the two.
  */
 export interface NotifySpec {
-  /** Channel to send through. */
-  channel: 'webhook' | 'desktop'
+  /**
+   * Channel to send through. `feishu` needs no `url`: it reuses the credentials
+   * written by the QR setup flow (`~/.dsh/dsh-hooks/feishu-config.json`) or the
+   * `DSH_HOOKS_FEISHU_*` environment variables, and sends the same card the
+   * shipped `examples/notify-feishu.mjs` renders — in process, so no script
+   * copy and no `run:` hook is needed.
+   */
+  channel: 'webhook' | 'desktop' | 'feishu'
   /** webhook: the target URL (falls back to the `DSH_HOOKS_WEBHOOK_URL` env var). */
   url?: string
   /** webhook: post a Slack-style `{ text }` one-line summary instead of the full context document. */
@@ -191,9 +197,11 @@ export const Config: {
       run: Schema.string().description('触发时通过系统 shell 执行的命令（与 notify 二选一）'),
       notify: Schema.union([
         Schema.object({
-          channel: Schema.union(['webhook', 'desktop'] as const)
+          channel: Schema.union(['webhook', 'desktop', 'feishu'] as const)
             .required()
-            .description('通知渠道：webhook 发 HTTP JSON；desktop 发系统桌面通知'),
+            .description(
+              '通知渠道：webhook 发 HTTP JSON；desktop 发系统桌面通知；feishu 用扫码流程写入的凭据（或 DSH_HOOKS_FEISHU_* 环境变量）直接发飞书卡片，无需外部脚本',
+            ),
           url: Schema.string().description('webhook 渠道的目标 URL（缺省时用环境变量 DSH_HOOKS_WEBHOOK_URL）'),
           slack: Schema.boolean().default(false).description('webhook 渠道：改为发送 Slack 风格 { text } 单行摘要'),
         }),
