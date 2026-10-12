@@ -5,6 +5,24 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # The browser half renders inside the dsh web shell's React, not ours:
+      # lib/client.js externalizes `react` / `react/jsx-runtime` /
+      # `react-dom/client` and resolves them from the shell's frozen module
+      # table (see tsdown.config.ts), and `react` is a peerDependency. The dsh
+      # 0.2.0-rc.2 shell ships react-dom@18.3.1, so a React 19 bump would only
+      # swap the types/tests while the runtime stays 18 — CI cannot see that
+      # mismatch, and the peer range would still declare ^18.2.0.
+      # Revisit when dsh itself moves to React 19 (then widen the peer range to
+      # `^18.2.0 || ^19.0.0` and verify on a host that really provides 19).
+      - dependency-name: react
+        update-types: ['version-update:semver-major']
+      - dependency-name: react-dom
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/react'
+        update-types: ['version-update:semver-major']
+      - dependency-name: '@types/react-dom'
+        update-types: ['version-update:semver-major']
 
   - package-ecosystem: github-actions
     directory: /
