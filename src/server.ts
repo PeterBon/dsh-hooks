@@ -198,6 +198,13 @@ export interface HookRoutesOptions {
   hooks: readonly HookSpec[]
   history: HistorySink
   version?: string
+  /**
+   * Profile this plugin is running inside — surfaced in `/dsh-hooks/status` so
+   * the settings panel can point the editor at the profile whose hooks are
+   * actually live instead of the hard-coded `web` default. Defaults to
+   * `DSH_PROFILE` (set by the host), then to an empty string when unknown.
+   */
+  profile?: string
   feishu?: FeishuRouteDeps
   /** Live runner counters for the diagnostics badge. */
   runner?: Pick<HookRunner, 'stats'>
@@ -261,6 +268,10 @@ function rejectBadProfile(res: ServerResponse, profile: string): boolean {
 /** Create the /dsh-hooks route handler (exported for tests). */
 export function createHookHandler(options: HookRoutesOptions) {  const { hooks, history } = options
   const version = options.version ?? pluginVersion()
+  // The running profile: hooks and their patch file are per-profile, while the
+  // Feishu credentials are shared under DSH_HOME — the panel needs to know which
+  // profile it is looking at to explain "connected but no hooks".
+  const profile = options.profile ?? (process.env.DSH_PROFILE ?? '').trim()
   const feishu = options.feishu
   const runFeishuTestCard = feishu?.runTest ?? runFeishuTest
   const feishuConfigPath = feishu?.configPath
@@ -290,6 +301,7 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         OK({
           name: 'dsh-hooks',
           version,
+          profile,
           hookCount: hooks.length,
           historyCount: records.length,
           hooks: describeHooks(hooks),
@@ -367,7 +379,15 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         for (const line of matchedHooks) {
           const hook = hooks[line.index - 1]
           if (hook.run) runner.run(hook, ctx)
-          else if (hook.notify) void fireNotify(hook.notify, ctx, undefined, { retries: hook.retries, retryDelayMs: hook.retryDelayMs })
+          else if (hook.notify) {
+            void fireNotify(
+              hook.notify,
+              ctx,
+              undefined,
+              { retries: hook.retries, retryDelayMs: hook.retryDelayMs },
+              feishuConfigPath,
+            )
+          }
         }
       }
 
@@ -478,8 +498,8 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
       }
       const body = payload as Record<string, unknown>
       const channel = body.channel
-      if (channel !== 'webhook' && channel !== 'desktop') {
-        json(res, FAIL('bad-request', '缺少字段 channel（webhook 或 desktop）'), 400)
+      if (channel !== 'webhook' && channel !== 'desktop' && channel !== 'feishu') {
+        json(res, FAIL('bad-request', '缺少字段 channel（webhook、desktop 或 feishu）'), 400)
         return
       }
       const ctx: HookContext = {
@@ -498,6 +518,8 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         },
         ctx,
         (record) => history.record(record),
+        {},
+        feishuConfigPath,
       )
       if (!result.ok) {
         json(res, FAIL('send-failed', result.error ?? '发送失败'), 500)

@@ -203,6 +203,14 @@ describe('hook editor / notify test / disconnect API', () => {
     expect(JSON.parse(init.body)).toEqual({ channel: 'desktop' })
   })
 
+  it('passes the feishu channel to the notify test', async () => {
+    const fetchFn = vi.fn().mockResolvedValue(jsonResponse({ ok: true, value: { message: '✅ 测试通知已发送' } }))
+    const result = await postNotifyTest('feishu', undefined, false, fetchFn as unknown as typeof fetch)
+    expect(result).toMatchObject({ ok: true, message: '✅ 测试通知已发送' })
+    const [, init] = fetchFn.mock.calls[0] as [string, { body: string }]
+    expect(JSON.parse(init.body)).toEqual({ channel: 'feishu' })
+  })
+
   it('saves hooks for a profile', async () => {
     const fetchFn = vi.fn().mockResolvedValue(
       jsonResponse({ ok: true, value: { hookCount: 3, patchFile: 'p.yml', backupPath: 'p.yml.bak', message: 'saved' } }),

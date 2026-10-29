@@ -67,6 +67,13 @@ export interface HookRoutesOptions {
     hooks: readonly HookSpec[];
     history: HistorySink;
     version?: string;
+    /**
+     * Profile this plugin is running inside — surfaced in `/dsh-hooks/status` so
+     * the settings panel can point the editor at the profile whose hooks are
+     * actually live instead of the hard-coded `web` default. Defaults to
+     * `DSH_PROFILE` (set by the host), then to an empty string when unknown.
+     */
+    profile?: string;
     feishu?: FeishuRouteDeps;
     /** Live runner counters for the diagnostics badge. */
     runner?: Pick<HookRunner, 'stats'>;
