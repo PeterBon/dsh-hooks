@@ -351,10 +351,10 @@ dsh-hooks dry-run usage/daily --field usageCacheReadTokens=90000   # 通用写�
 
 安装后，dsh web 的设置面板里会出现「Hooks」分区（与「通用」「插件」平级）：
 
-- **状态徽章**：插件版本、hook 数、历史条数，以及运行诊断（正在执行的 hook 数、最近失败数）
+- **状态徽章**：插件版本、运行中的 profile、hook 数、历史条数，以及运行诊断（正在执行的 hook 数、最近失败数）
 - **手动测试**：选事件（18 类）+ reason/tool，并可用「模拟字段」一行填入 `runningSubagents` / `durationMs` / usage 输入输出等数值上下文；「模拟」看逐 hook 匹配报告，「执行」真实触发；切换输入自动清空旧结果
-- **通知渠道测试**：向 webhook（可选 Slack 摘要）/ desktop 渠道发一条测试通知，显示发送内容预览；飞书渠道的测试用上面「飞书通知」里的一键测试卡片
-- **飞书通知**：网页内扫码连接飞书——显示二维码（含有效期倒计时、可取消），扫码后自动创建应用、写入凭据与 hook 配置；已连接后显示应用摘要，可一键发送测试卡片、调整卡片截断长度（50–5000 字符，默认 300，带正文预览）、重新扫码换绑或断开连接（可选一并移除飞书 hooks）
+- **通知渠道测试**：向 webhook（可选 Slack 摘要）/ desktop / feishu 渠道发一条测试通知，显示发送内容预览；已连接飞书时渠道默认选中 feishu
+- **飞书通知**：网页内扫码连接飞书——显示二维码（含有效期倒计时、可取消），扫码后自动创建应用、写入凭据与 hook 配置；已连接后显示应用摘要，可一键发送测试卡片、调整卡片截断长度（50–5000 字符，默认 300，带正文预览）、重新扫码换绑或断开连接（可选一并移除飞书 hooks）。飞书凭据在 `DSH_HOME` 里全 profile 共享，而 hooks 是 profile 级的，所以**已连接但当前 profile 没有任何飞书 hook**时会显示警告，并可直接一键写入常用 5 条 hook（换新 profile 后最容易踩这个坑）
 - **当前 hooks**：只读清单（事件/when/match/run/notify + 超时重试参数），一键「复制 YAML」；点「编辑」进入表单编辑器，增删改 hook 后写回 `cordis.patch.yml`（自动备份原文件、写前校验正则与 run/notify 二选一，保存即热加载）。每个 hook 的「动作」下拉可选 `执行命令（run）`、`通知 webhook`、`通知 desktop` 或 `通知 feishu`（用扫码写入的凭据，不需要脚本）
 - **执行历史时间线**：位于分区底部、**默认折叠**（展开状态记忆于 localStorage），5 秒自动刷新。展开后可按**事件 / 结果 / 会话**过滤（条件同样记忆在 localStorage，附「显示 N / 共 M 条」计数与「清空过滤」），并把当前视图**导出为 JSONL**（与磁盘上的 `history.jsonl` 同格式，文件名带本地时间戳）——面板一次拉取最近 200 条，过滤在浏览器侧完成
 
@@ -366,10 +366,10 @@ web profile 里（存在共享 webServer 服务时）dsh-hooks 自动注册 `/ds
 
 | 路由 | 方法 | 用途 |
 | --- | --- | --- |
-| `/dsh-hooks/status` | GET | 插件版本、hook 数、历史条数、**当前 hooks 清单**与运行统计 |
+| `/dsh-hooks/status` | GET | 插件版本、**运行中的 profile**、hook 数、历史条数、**当前 hooks 清单**与运行统计 |
 | `/dsh-hooks/history?n=50` | GET | 最近 N 条执行历史（JSON envelope） |
 | `/dsh-hooks/test` | POST | 模拟事件评估：`{"event":"tool/call","tool":"ssh_exec","execute":false}` 返回逐 hook 匹配报告；可用 `fields` 覆盖数值上下文（`{"event":"turn/end","fields":{"runningSubagents":2}}`，非法字段返回 400）；`execute: true` 真跑匹配的 hook |
-| `/dsh-hooks/notify/test` | POST | 向指定渠道发测试通知：`{"channel":"webhook","url":…,"slack":true}` 或 `{"channel":"desktop"}`，返回发送内容预览 |
+| `/dsh-hooks/notify/test` | POST | 向指定渠道发测试通知：`{"channel":"webhook","url":…,"slack":true}`、`{"channel":"desktop"}` 或 `{"channel":"feishu"}`（用扫码写入的凭据），返回发送内容预览 |
 | `/dsh-hooks/hooks/save` | POST | 保存 hook 列表：`{"profile":"web","hooks":[…]}`——校验（事件/when/正则/run-notify 二选一）后写回 cordis.patch.yml，自动备份原文件 |
 | `/dsh-hooks/feishu/status` | GET | 飞书连接摘要（app id / 目标均已打码，绝不返回 secret）+ 扫码会话快照 + 截断长度 + 正文预览 |
 | `/dsh-hooks/feishu/setup` | POST | 启动扫码会话：`{"profile":"web","resultMaxChars":800}`，返回二维码 URL / PNG data URL / 有效期；进行中时再次请求返回 409 |

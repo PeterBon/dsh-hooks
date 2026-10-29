@@ -356,6 +356,23 @@ body[data-ds-dark-theme] .dh-select {
   font-size: 11px;
 }
 
+/* Connected Feishu but no hook actually delivers through it: hooks are
+   per-profile while the credentials are shared, which is exactly the state
+   that silently drops session notifications. */
+.dh-feishu-warn {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 8px 10px;
+  border: 1px solid rgba(217, 161, 60, 0.4);
+  border-radius: 6px;
+  background: rgba(217, 161, 60, 0.12);
+  color: var(--dsh-hooks-warn);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .dh-feishu-link {
   color: var(--dsh-hooks-accent);
   font-size: 12px;

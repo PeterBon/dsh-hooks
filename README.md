@@ -348,10 +348,10 @@ Simulatable fields: `turn`, `step`, `durationMs`, `toolDurationMs`, `runningSuba
 
 After install, the dsh web settings panel gains a "Hooks" section (beside General and Plugins):
 
-- **Status badges**: plugin version, hook count, history count, plus live diagnostics (in-flight runs, recent failures)
+- **Status badges**: plugin version, the running profile, hook count, history count, plus live diagnostics (in-flight runs, recent failures)
 - **Manual tester**: pick an event (18 kinds) + reason/tool, and fill the "simulated fields" row with numeric context (`runningSubagents`, `durationMs`, usage in/out); "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks; the report clears when the inputs change
-- **Notify-channel tests**: fire a test notification at the webhook (optional Slack summary) / desktop channel and show the payload preview; the Feishu channel is tested with the one-click test card in the Feishu section below
-- **Feishu connect**: scan-to-connect inside the panel — the QR code renders inline (with expiry countdown and a cancel button); after the scan the app is created, credentials + hook config are written, and the connected summary offers a one-click test card, an inline truncation-length editor (50–5000 chars, default 300, with a content preview), a re-connect flow, and a disconnect (optionally removing the Feishu hooks)
+- **Notify-channel tests**: fire a test notification at the webhook (optional Slack summary) / desktop / feishu channel and show the payload preview; once Feishu is connected the feishu channel is preselected
+- **Feishu connect**: scan-to-connect inside the panel — the QR code renders inline (with expiry countdown and a cancel button); after the scan the app is created, credentials + hook config are written, and the connected summary offers a one-click test card, an inline truncation-length editor (50–5000 chars, default 300, with a content preview), a re-connect flow, and a disconnect (optionally removing the Feishu hooks). Credentials live in `DSH_HOME` (shared by every profile) while hooks are per-profile, so **connected but no Feishu hook in the running profile** shows a warning with a one-click "write the five default Feishu hooks" fix — the trap a fresh profile falls into
 - **Hook list / editor**: a read-only list of the current hooks (event/when/match/run/notify + timeout/retry fields) with one-click "copy YAML"; the "edit" mode turns it into a form editor whose changes are validated (regexes, run-notify exclusivity) and written back to `cordis.patch.yml` with an automatic backup. Each hook's action dropdown offers `run a command`, `notify webhook`, `notify desktop`, or `notify feishu` (using the credentials from the scan, no script needed)
 - **Execution-history timeline**: at the bottom of the card, **collapsed by default** (the toggle state persists in localStorage), refreshed every 5s. Expanded, it filters by **event / outcome / session** (filters persist in localStorage, with a "showing N of M" count and a clear button) and **exports the current view as JSONL** (same shape as the on-disk `history.jsonl`, file name stamped with local time); the panel fetches the latest 200 records and filters in the browser
 
@@ -363,10 +363,10 @@ In the web profile (when the shared webServer service exists) dsh-hooks register
 
 | Route | Method | Purpose |
 | --- | --- | --- |
-| `/dsh-hooks/status` | GET | plugin version, hook count, history count, the **current hook list**, and live runner stats |
+| `/dsh-hooks/status` | GET | plugin version, the **running profile**, hook count, history count, the **current hook list**, and live runner stats |
 | `/dsh-hooks/history?n=50` | GET | the latest N execution records (JSON envelope) |
 | `/dsh-hooks/test` | POST | simulate an event: `{"event":"tool/call","tool":"ssh_exec","execute":false}` returns a per-hook match report; `fields` overrides numeric context (`{"event":"turn/end","fields":{"runningSubagents":2}}`, unknown fields → 400); `execute: true` actually runs the matching hooks |
-| `/dsh-hooks/notify/test` | POST | fire a test notification at a channel: `{"channel":"webhook","url":…,"slack":true}` or `{"channel":"desktop"}`; returns the payload preview |
+| `/dsh-hooks/notify/test` | POST | fire a test notification at a channel: `{"channel":"webhook","url":…,"slack":true}`, `{"channel":"desktop"}` or `{"channel":"feishu"}` (using the scan credentials); returns the payload preview |
 | `/dsh-hooks/hooks/save` | POST | save the hook list: `{"profile":"web","hooks":[…]}` — validates (events, reasons, regexes, run-notify exclusivity), writes back to cordis.patch.yml with an automatic backup |
 | `/dsh-hooks/feishu/status` | GET | Feishu connection summary (app id / target masked, secret never leaves the server) + the scan-session snapshot + the truncation length + a content preview |
 | `/dsh-hooks/feishu/setup` | POST | start a scan session: `{"profile":"web","resultMaxChars":800}`; returns the QR URL / PNG data URL / expiry (409 while one is pending) |

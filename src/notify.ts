@@ -344,20 +344,24 @@ function runAndWait(argv: string[], env: Record<string, string>, timeoutMs: numb
 /**
  * Fire a built-in notification; failures only warn and surface in the result.
  * `retry` carries the hook's `retries` / `retryDelayMs` — honoured by the
- * webhook channel; the desktop channel is a local spawn and never retries.
+ * webhook and Feishu channels; the desktop channel is a local spawn and never
+ * retries. `feishuConfigPath` overrides the Feishu credential file (the
+ * settings panel's channel test points it at the profile's config so a test
+ * never reads the real `~/.dsh` file).
  */
 export async function fireNotify(
   spec: NotifySpec,
   ctx: HookContext,
   record?: NotifyRecord,
   retry: NotifyRetryOptions = {},
+  feishuConfigPath?: string,
 ): Promise<NotifyResult> {
   const startedAt = Date.now()
   const result =
     spec.channel === 'webhook'
       ? await sendWebhook(spec, ctx, process.env, retry)
       : spec.channel === 'feishu'
-        ? await sendFeishu(ctx, retry)
+        ? await sendFeishu(ctx, retry, feishuConfigPath)
         : await sendDesktop(spec, ctx)
   if (result.aborted === true) {
     // Teardown, not a delivery failure: history records it as skipped and no

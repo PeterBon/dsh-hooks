@@ -107,6 +107,13 @@ describe('createHookHandler', () => {
     })
   })
 
+  it('exposes the running profile on /dsh-hooks/status', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }), profile: 'desktop' })
+    const res = fakeRes()
+    await handler(fakeReq(), res)
+    expect(readJson(res).body).toMatchObject({ ok: true, value: { profile: 'desktop' } })
+  })
+
   it('describes execution options and numeric match values for the panel', async () => {
     const withOptions = [
       {
@@ -402,6 +409,49 @@ describe('Feishu routes', () => {
     const { statusCode, body } = readJson(res)
     expect(statusCode).toBe(500)
     expect(body).toMatchObject({ ok: false, error: { code: 'send-failed', message: '配置文件不完整' } })
+  })
+
+  it('sends a Feishu channel test through the configured credential file', async () => {
+    writeFileSync(
+      configPath,
+      JSON.stringify({ app_id: 'cli_a1b2', app_secret: 's', target_type: 'open_id', target_id: 'ou_x' }),
+      'utf8',
+    )
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const href = String(input)
+      const payload = href.includes('tenant_access_token')
+        ? { code: 0, tenant_access_token: 't-1', expire: 7200 }
+        : { code: 0, data: { message_id: 'om_1' } }
+      return { ok: true, status: 200, json: async () => payload } as Response
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const history = createHistorySink({ enabled: false })
+      const handler = createHookHandler({ hooks, history, feishu: { manager: fakeManager(), configPath } })
+      const res = fakeRes()
+      await handler(bodyReq('/dsh-hooks/notify/test', { channel: 'feishu' }), res)
+      const { statusCode, body } = readJson(res)
+      expect(statusCode).toBe(200)
+      expect(body).toMatchObject({
+        ok: true,
+        value: { message: expect.any(String), preview: expect.stringContaining('测试通知') },
+      })
+      expect(history.recent()).toMatchObject([{ kind: 'notify', command: 'notify:feishu', outcome: 'sent' }])
+      const urls = fetchMock.mock.calls.map(([url]) => String(url))
+      expect(urls.some((url) => url.includes('tenant_access_token'))).toBe(true)
+      expect(urls.some((url) => url.includes('im/v1/messages'))).toBe(true)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('reports a missing Feishu credential as send-failed, not bad-request', async () => {
+    const handler = createHookHandler({ hooks, history: createHistorySink({ enabled: false }), feishu: { manager: fakeManager(), configPath } })
+    const res = fakeRes()
+    await handler(bodyReq('/dsh-hooks/notify/test', { channel: 'feishu' }), res)
+    const { statusCode, body } = readJson(res)
+    expect(statusCode).toBe(500)
+    expect(body).toMatchObject({ ok: false, error: { code: 'send-failed' } })
   })
 
   it('requires application/json on feishu POSTs', async () => {

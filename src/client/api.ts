@@ -49,6 +49,8 @@ export interface HookStats {
 export interface StatusInfo {
   name: string
   version: string
+  /** Profile the plugin is running inside (empty when the host did not say). */
+  profile?: string
   hookCount: number
   historyCount: number
   hooks: HookDescriptor[]
@@ -341,8 +343,10 @@ async function postValue(
   }
 }
 
+export type NotifyTestChannel = 'webhook' | 'desktop' | 'feishu'
+
 export async function postNotifyTest(
-  channel: 'webhook' | 'desktop',
+  channel: NotifyTestChannel,
   url: string | undefined,
   slack: boolean,
   fetchFn: typeof fetch = fetch,

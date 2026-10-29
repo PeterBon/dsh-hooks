@@ -87,6 +87,9 @@ export declare function sendDesktop(spec: NotifySpec, ctx: HookContext): Promise
 /**
  * Fire a built-in notification; failures only warn and surface in the result.
  * `retry` carries the hook's `retries` / `retryDelayMs` — honoured by the
- * webhook channel; the desktop channel is a local spawn and never retries.
+ * webhook and Feishu channels; the desktop channel is a local spawn and never
+ * retries. `feishuConfigPath` overrides the Feishu credential file (the
+ * settings panel's channel test points it at the profile's config so a test
+ * never reads the real `~/.dsh` file).
  */
-export declare function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord, retry?: NotifyRetryOptions): Promise<NotifyResult>;
+export declare function fireNotify(spec: NotifySpec, ctx: HookContext, record?: NotifyRecord, retry?: NotifyRetryOptions, feishuConfigPath?: string): Promise<NotifyResult>;

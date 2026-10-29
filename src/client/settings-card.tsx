@@ -33,6 +33,7 @@ import {
   type HistoryRecord,
   type HookDescriptor,
   type HookWireSpec,
+  type NotifyTestChannel,
   type StatusInfo,
   type TestResult,
 } from './api.ts'
@@ -155,6 +156,20 @@ function toWire(draft: HookWireSpec): HookWireSpec {
 
 const NEW_HOOK: HookWireSpec = { on: 'turn/end', when: 'completed', run: '' }
 
+/**
+ * The list the Feishu connect flow installs (`setupHooks` in `feishu.ts`):
+ * five built-in `feishu` channel notifications. Mirrored here so the panel can
+ * offer it as a one-click repair when the running profile has none — the state
+ * that "connected" alone does not reveal.
+ */
+const DEFAULT_FEISHU_HOOKS: HookWireSpec[] = [
+  { on: 'turn/end', when: 'completed', notify: { channel: 'feishu' } },
+  { on: 'turn/end', when: 'error', notify: { channel: 'feishu' } },
+  { on: 'turn/end', when: 'aborted', notify: { channel: 'feishu' } },
+  { on: 'approval/asked', notify: { channel: 'feishu' } },
+  { on: 'agent/error', notify: { channel: 'feishu' } },
+]
+
 /** Settings-slot component; the shell's slot machinery supplies the props. */
 export function HooksSettingsCard(_props: object): ReactNode {
   const [status, setStatus] = useState<StatusInfo | null>(null)
@@ -192,8 +207,11 @@ export function HooksSettingsCard(_props: object): ReactNode {
   // Optional numeric context overrides for the tester (empty = not simulated).
   const [mockFields, setMockFields] = useState({ runningSubagents: '', durationMs: '', usageInputTokens: '', usageOutputTokens: '' })
 
-  // Notify-channel quick test.
-  const [notifyChannel, setNotifyChannel] = useState<'webhook' | 'desktop'>('webhook')
+  // Notify-channel quick test. Feishu joins the list once it is connected and
+  // becomes the default (that is the channel most people mean by "test the
+  // notification") — until the user deliberately picks another one.
+  const [notifyChannel, setNotifyChannel] = useState<NotifyTestChannel>('webhook')
+  const [notifyChannelPinned, setNotifyChannelPinned] = useState(false)
   const [notifyUrl, setNotifyUrl] = useState('')
   const [notifySlack, setNotifySlack] = useState(false)
   const [notifyResult, setNotifyResult] = useState<{ ok: boolean; text: string; preview?: string } | null>(null)
@@ -259,6 +277,14 @@ export function HooksSettingsCard(_props: object): ReactNode {
     setTestResult(null)
   }, [event, reason, tool, mockFields])
 
+  // Follow the Feishu connection: default the channel test to it, and fall back
+  // to webhook if the connection is dropped. A user-chosen channel is kept.
+  useEffect(() => {
+    if (notifyChannelPinned) return
+    if (feishu?.configured === true) setNotifyChannel('feishu')
+    else setNotifyChannel((current) => (current === 'feishu' ? 'webhook' : current))
+  }, [feishu?.configured, notifyChannelPinned])
+
   /** Numeric overrides the user actually filled in (empty inputs are skipped). */
   const testFields = (): Record<string, number> | undefined => {
     const fields: Record<string, number> = {}
@@ -306,6 +332,63 @@ export function HooksSettingsCard(_props: object): ReactNode {
     const result = await postNotifyTest(notifyChannel, notifyUrl.trim() || undefined, notifySlack)
     if (!result.ok) setNotifyResult({ ok: false, text: result.error ?? '发送失败' })
     else setNotifyResult({ ok: true, text: result.message ?? '已发送', preview: result.preview })
+  }
+
+  /** Profile whose hooks are live — the editor target the user actually means. */
+  const runningProfile = (status?.profile ?? '').trim()
+
+  // Point the editor at the profile that is actually live the first time the
+  // panel sees it; an explicit choice already stored is never overridden.
+  useEffect(() => {
+    if (runningProfile === '') return
+    if (loadStored('dsh-hooks.profile', '') !== '') return
+    setProfile(runningProfile)
+    storeValue('dsh-hooks.profile', runningProfile)
+  }, [runningProfile])
+
+  /** Live hooks that really deliver through Feishu. */
+  const feishuHookCount = status?.hooks.filter((hook) => hook.notify?.channel === 'feishu').length ?? 0
+
+  /**
+   * Reminder under the profile inputs. Hooks (and the patch file they live in)
+   * are per-profile while the Feishu credentials are shared under DSH_HOME, so
+   * the panel must say which profile it is looking at — otherwise a connected
+   * Feishu plus a `web` target silently leaves the running profile untouched.
+   */
+  const profileHint = (): ReactNode => {
+    const target = profile.trim()
+    if (runningProfile === '') {
+      return <div className="dh-feishu-hint">hooks 与 cordis.patch.yml 都是 profile 级的。</div>
+    }
+    if (target !== '' && target !== runningProfile) {
+      return (
+        <div className="dh-feishu-warn">
+          运行中的 profile 是 <strong>{runningProfile}</strong>，这里填的是 <strong>{target}</strong>：保存只会改 {target}{' '}
+          的配置，当前 profile 的会话不会推送。
+        </div>
+      )
+    }
+    return (
+      <div className="dh-feishu-hint">
+        运行中的 profile：{runningProfile}（hooks 是 profile 级的；飞书凭据在 DSH_HOME 里共享）
+      </div>
+    )
+  }
+
+  /** Write the default five Feishu hooks into the profile this plugin runs in. */
+  const writeFeishuHooks = async () => {
+    const target = runningProfile !== '' ? runningProfile : profile.trim() !== '' ? profile.trim() : 'web'
+    setConfigMessage(null)
+    const result = await postHooksSave(target, DEFAULT_FEISHU_HOOKS)
+    if (!result.ok) {
+      setConfigMessage({ ok: false, text: result.error ?? '写入失败' })
+      return
+    }
+    setConfigMessage({
+      ok: true,
+      text: `✅ 已写入 ${result.hookCount ?? DEFAULT_FEISHU_HOOKS.length} 条飞书 hook 到 ${target} profile（原文件已备份）。`,
+    })
+    void refresh()
   }
 
   const connectFeishu = async () => {
@@ -511,6 +594,9 @@ export function HooksSettingsCard(_props: object): ReactNode {
           {status !== null && (
             <>
               <span className="dh-badge">v{status.version}</span>
+              {status.profile !== undefined && status.profile !== '' && (
+                <span className="dh-badge">{status.profile} profile</span>
+              )}
               <span className="dh-badge">{status.hookCount} hooks</span>
               <span className="dh-badge">{status.historyCount} 记录</span>
               {status.stats.inFlight > 0 && <span className="dh-badge">{status.stats.inFlight} 运行中</span>}
@@ -631,10 +717,14 @@ export function HooksSettingsCard(_props: object): ReactNode {
               <select
                 className="dh-select"
                 value={notifyChannel}
-                onChange={(e) => setNotifyChannel(e.target.value as 'webhook' | 'desktop')}
+                onChange={(e) => {
+                  setNotifyChannel(e.target.value as NotifyTestChannel)
+                  setNotifyChannelPinned(true)
+                }}
               >
                 <option value="webhook">webhook（HTTP JSON）</option>
                 <option value="desktop">desktop（系统通知）</option>
+                {feishu?.configured === true && <option value="feishu">feishu（飞书卡片）</option>}
               </select>
             </label>
             {notifyChannel === 'webhook' && (
@@ -654,6 +744,9 @@ export function HooksSettingsCard(_props: object): ReactNode {
               <input type="checkbox" checked={notifySlack} onChange={(e) => setNotifySlack(e.target.checked)} />
               Slack 风格单行摘要
             </label>
+          )}
+          {notifyChannel === 'feishu' && (
+            <div className="dh-feishu-hint">使用「飞书通知」里连接的凭据发送卡片；未连接时这里会报错。</div>
           )}
           <div className="dh-buttons">
             <button type="button" className="dh-button dh-button-primary" onClick={() => void sendNotifyTest()}>
@@ -702,6 +795,26 @@ export function HooksSettingsCard(_props: object): ReactNode {
                   ? `（接收者 ${feishu.targetKind}: ${feishu.target}）`
                   : ''}
               </div>
+              {status !== null && feishuHookCount === 0 && (
+                <div className="dh-feishu-warn">
+                  <div>
+                    飞书已连接，但当前 profile（{runningProfile !== '' ? runningProfile : '未知'}）里没有 hook 走飞书渠道，
+                    会话结束不会推送。
+                    {status.hookCount > 0
+                      ? '可在下方「当前 hooks」里把通知渠道改成 feishu，或直接改 cordis.patch.yml。'
+                      : ''}
+                  </div>
+                  {status.hookCount === 0 && (
+                    <button
+                      type="button"
+                      className="dh-button dh-button-primary"
+                      onClick={() => void writeFeishuHooks()}
+                    >
+                      写入常用 5 条飞书 hook
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="dh-feishu-row">
                 <label className="dh-field dh-field-narrow">
                   <span className="dh-field-label">卡片截断长度（50–5000 字符）</span>
@@ -778,6 +891,7 @@ export function HooksSettingsCard(_props: object): ReactNode {
                   />
                 </label>
               </div>
+              {profileHint()}
               <div className="dh-buttons">
                 <button type="button" className="dh-button dh-button-primary" onClick={() => void connectFeishu()}>
                   扫码连接飞书
@@ -821,6 +935,7 @@ export function HooksSettingsCard(_props: object): ReactNode {
                 />
               </label>
             </div>
+            {profileHint()}
             {draftHooks.map((hook, index) => (
               <div className="dh-hook dh-hook-editing" key={index}>
                 <div className="dh-test-row">
