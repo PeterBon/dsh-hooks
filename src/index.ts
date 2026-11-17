@@ -32,16 +32,29 @@ import { registerHookRoutes, type WebServerLike } from './server.js'
 
 export const name = 'dsh-hooks'
 
+/** Minimal structural contract of one live agent owned by the `agents` service. */
+interface AgentLike {
+  id: string
+  status: string
+  /** The agent's live Session; its durable header carries the parent link. */
+  session?: { header?: { parentSession?: unknown } }
+}
+
 /** Minimal structural contract of the optional `agents` service. */
 interface AgentsLike {
-  get(id: string): { id: string; status: string } | undefined
-  list(): Array<{ id: string; status: string }>
-  isOwnedBy(id: string, owner: { id: string }): boolean
+  get(id: string): AgentLike | undefined
+  list(): AgentLike[]
 }
 
 /** Minimal structural contract of the optional `subagents` service. */
 interface SubagentsLike {
   listDescendants(rootSessionId: string): Promise<Array<{ id?: string; kind?: string }>>
+}
+
+/** Durable direct-parent link of one live agent, or undefined for a root agent. */
+function parentSessionOf(agent: AgentLike): string | undefined {
+  const parent = agent.session?.header?.parentSession
+  return parent === undefined ? undefined : String(parent)
 }
 
 /** Snapshot of one session's subagent tree: live-running plus total descendants. */
@@ -58,7 +71,10 @@ export interface SubagentTreeStats {
  * Lineage comes from the durable session tree (`subagents.listDescendants`,
  * driven by the session header `parentSession`): a subagent's runtime owner
  * in the agents registry is the subagent manager's host-level scope, not the
- * parent agent, so ownership chains (`agents.isOwnedBy`) cannot find children.
+ * parent agent, so registry ownership queries cannot find children. dsh
+ * 0.2.1-rc.3 removed `AgentRegistry.isOwnedBy()`/`roots()` — runtime tree
+ * membership now belongs to subagent Activations — so the fallback reads the
+ * durable header link instead.
  * Only agents whose live status is `running` count as running — a settled/idle
  * continuable child does not. Diagnostic rows (dsh 0.2's marker for a child
  * whose record could not be read) are not descendants and are left out of both
@@ -68,6 +84,8 @@ export interface SubagentTreeStats {
  * The live-registry scan is strictly a fallback for when listing is
  * unavailable (service absent or listing threw): a successful empty listing
  * stays empty, so ordinary subagent-free turns don't pay an O(registry) scan.
+ * That scan matches the direct parent recorded on each live agent's Session
+ * header, so a deep tree degrades to its first level in fallback mode.
  */
 export async function inspectSubagentTree(
   agents: AgentsLike,
@@ -93,11 +111,9 @@ export async function inspectSubagentTree(
     }
   }
   if (!listed) {
-    const owner = agents.get(sessionId)
-    if (owner === undefined) return { running: 0, total: 0 }
     ids = agents
       .list()
-      .filter((candidate) => candidate !== owner && agents.isOwnedBy(candidate.id, owner))
+      .filter((candidate) => candidate.id !== sessionId && parentSessionOf(candidate) === sessionId)
       .map((candidate) => candidate.id)
   }
   let running = 0

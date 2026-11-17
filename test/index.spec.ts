@@ -112,18 +112,23 @@ describe('apply soft-dependency wiring', () => {
 })
 
 describe('countRunningSubagents', () => {
-  const mk = (id: string, status = 'idle') => ({ id, status })
+  // The fallback scan reads the durable header link (`session.header.parentSession`)
+  // because dsh 0.2.1-rc.3 removed AgentRegistry.isOwnedBy().
+  const mk = (id: string, status = 'idle', parentSession?: string) => ({
+    id,
+    status,
+    ...(parentSession === undefined ? {} : { session: { header: { parentSession } } }),
+  })
   const parent = mk('session-main')
-  const runningChild = mk('sub-1', 'running')
+  const runningChild = mk('sub-1', 'running', 'session-main')
   const idleChild = mk('sub-2')
-  const runningGrandchild = mk('sub-2a', 'running')
+  const runningGrandchild = mk('sub-2a', 'running', 'sub-2')
   const otherRoot = mk('session-other', 'running')
 
   const agents = {
     get: (id: string) =>
       ({ 'session-main': parent, 'sub-1': runningChild, 'sub-2': idleChild, 'sub-2a': runningGrandchild, 'session-other': otherRoot })[id],
     list: () => [parent, runningChild, idleChild, runningGrandchild, otherRoot],
-    isOwnedBy: () => false,
   }
   const descendants = (rows: Array<{ id: string }>) => ({ listDescendants: async () => rows })
 
@@ -147,39 +152,52 @@ describe('countRunningSubagents', () => {
     await expect(countRunningSubagents(agents, descendants([{ id: 'sub-1' }]), 'nope')).resolves.toBe(0)
   })
 
-  it('returns 0 when listing throws and the registry scan finds no owner match', async () => {
+  it('returns 0 when listing throws and the header scan finds no child', async () => {
     const broken = { listDescendants: async () => { throw new Error('boom') } }
-    await expect(countRunningSubagents(agents, broken, 'session-main')).resolves.toBe(0)
+    const unrelated = {
+      get: (id: string) => (id === 'session-main' ? mk('session-main') : undefined),
+      list: () => [mk('session-main'), mk('stranger', 'running', 'session-other')],
+    }
+    await expect(countRunningSubagents(unrelated, broken, 'session-main')).resolves.toBe(0)
   })
 
-  it('finds live children through the registry scan when the subagents service is absent', async () => {
-    const owned = { ...agents, isOwnedBy: (id: string) => id === 'sub-1' }
-    await expect(countRunningSubagents(owned, undefined, 'session-main')).resolves.toBe(1)
+  it('finds direct children through the header scan when the subagents service is absent', async () => {
+    await expect(countRunningSubagents(agents, undefined, 'session-main')).resolves.toBe(1)
   })
 
-  it('finds live children through the registry scan when listing throws', async () => {
+  it('finds direct children through the header scan when listing throws', async () => {
     const broken = { listDescendants: async () => { throw new Error('boom') } }
-    const owned = { ...agents, isOwnedBy: (id: string) => id === 'sub-1' }
-    await expect(countRunningSubagents(owned, broken, 'session-main')).resolves.toBe(1)
+    await expect(countRunningSubagents(agents, broken, 'session-main')).resolves.toBe(1)
   })
 
   it('does not consult the registry when listing succeeds with no descendants', async () => {
-    // A lying registry would claim ownership of sub-1; the successful empty
-    // listing must win, keeping ordinary subagent-free turns scan-free.
-    const lying = { ...agents, isOwnedBy: () => true }
+    // A lying registry would claim a live child; the successful empty listing
+    // must win, keeping ordinary subagent-free turns scan-free.
+    let scans = 0
+    const lying = {
+      ...agents,
+      list: () => {
+        scans++
+        return agents.list()
+      },
+    }
     await expect(countRunningSubagents(lying, descendants([]), 'session-main')).resolves.toBe(0)
+    expect(scans).toBe(0)
   })
 })
 
 describe('inspectSubagentTree', () => {
-  const mk = (id: string, status = 'idle') => ({ id, status })
+  const mk = (id: string, status = 'idle', parentSession?: string) => ({
+    id,
+    status,
+    ...(parentSession === undefined ? {} : { session: { header: { parentSession } } }),
+  })
   const parent = mk('session-main')
-  const runningChild = mk('sub-1', 'running')
-  const idleChild = mk('sub-2')
+  const runningChild = mk('sub-1', 'running', 'session-main')
+  const idleChild = mk('sub-2', 'idle', 'session-main')
   const agents = {
     get: (id: string) => ({ 'session-main': parent, 'sub-1': runningChild, 'sub-2': idleChild })[id],
     list: () => [parent, runningChild, idleChild],
-    isOwnedBy: () => false,
   }
   const descendants = (rows: Array<{ id: string; kind?: string }>) => ({ listDescendants: async () => rows })
 
@@ -201,9 +219,8 @@ describe('inspectSubagentTree', () => {
     await expect(inspectSubagentTree(agents, descendants([{ id: 'sub-1' }]), 'nope')).resolves.toEqual({ running: 0, total: 0 })
   })
 
-  it('falls back to the registry scan for both counts', async () => {
-    const owned = { ...agents, isOwnedBy: (id: string) => id === 'sub-1' }
-    await expect(inspectSubagentTree(owned, undefined, 'session-main')).resolves.toEqual({ running: 1, total: 1 })
+  it('falls back to the session-header scan for both counts (direct children only)', async () => {
+    await expect(inspectSubagentTree(agents, undefined, 'session-main')).resolves.toEqual({ running: 1, total: 2 })
   })
 
   it('keeps dsh 0.2 diagnostic rows out of the descendant total', async () => {
@@ -224,11 +241,10 @@ describe('turn/end dispatch wiring', () => {
   const turnEndEvent = { type: 'turn/end', data: { turn: 1, reason: { kind: 'completed' } } }
   const userMessageEvent = { type: 'user/message', data: { content: [{ type: 'text', text: 'hi' }], source: { kind: 'user' } } }
   const parent = { id: 'session-main', status: 'idle' }
-  const runningChild = { id: 'sub-1', status: 'running' }
+  const runningChild = { id: 'sub-1', status: 'running', session: { header: { parentSession: 'session-main' } } }
   const agents = {
     get: (id: string) => (id === 'session-main' ? parent : id === 'sub-1' ? runningChild : undefined),
     list: () => [parent, runningChild],
-    isOwnedBy: () => false,
   }
   const subagents = { listDescendants: async () => [{ id: 'sub-1' }] }
 
@@ -273,7 +289,7 @@ describe('turn/end dispatch wiring', () => {
     expect(spawnEnv().DSH_HOOK_RUNNING_SUBAGENTS).toBe('0')
   })
 
-  it('still dispatches (count 0) when the descendant listing throws', async () => {
+  it('falls back to the header scan (count 1) when the descendant listing throws', async () => {
     const broken = { listDescendants: async () => { throw new Error('boom') } }
     const { emit } = wire(
       { agents, subagents: broken },
@@ -285,7 +301,7 @@ describe('turn/end dispatch wiring', () => {
     emit()
     await flush()
     expect(spawnMock).toHaveBeenCalledOnce()
-    expect(spawnEnv().DSH_HOOK_RUNNING_SUBAGENTS).toBe('0')
+    expect(spawnEnv().DSH_HOOK_RUNNING_SUBAGENTS).toBe('1')
   })
 
   it('dispatches non-turn/end events synchronously, without the field', async () => {
@@ -318,7 +334,6 @@ describe('tree/settled wiring', () => {
       return undefined
     },
     list: () => [],
-    isOwnedBy: () => false,
   }
   // The durable descendant tree keeps settled children; only the live
   // registry status flips when the child's agent goes idle.
