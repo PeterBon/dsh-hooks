@@ -92,20 +92,32 @@ npm 包页 → Settings → Trusted Publishing → Add：
    （证明仍是 pnpm 规范输出）。更稳妥的做法：Dependabot PR 合并前先
    `@dependabot rebase`，让分支基于当前 main 重生成锁文件再合。
 
-8. **dsh 升大版本时，插件必须同步改 `peerDependencies` 的宿主下限，否则会被静默禁用**。
-   宿主只检查 `@deepseek-ai/dsh` / `@deepseek-ai/dsh-*` 这几条 peer
-   （`dsh-app-boot` 的 `evaluatePluginCompatibility`，semver 带 `includePrerelease`），
-   而 `^0.1.0-rc.6` 这类范围反解出的上界是 `0.2.0-0` → 在 0.2 运行时上判 false：
-   preflight 会把该插件行置 `disabled`，只在启动 stderr 留一行，**服务器本身照样健康**
-   （所以只看 `/degraded` 会发现不了）。改之前只能靠 `compatibility.json` 的精确豁免硬撑。
-   预发布版本要写足：`^0.2.0-rc.2` 通过，`^0.2.0` 同样 false。
-   只有 `peerDependencies` 参与判定，`dsh.engines.dsh` 不参与。
+8. **dsh 升大版本时，插件必须同步核对宿主版本声明，否则会被静默禁用**。
+   宿主 preflight（`dsh-app-boot` 的 `evaluatePluginCompatibility`）**先读包的 `engines.dsh`：
+   有则它单独决定、忽略 DSH peer**；只有没写 `engines.dsh` 时才退回按 `peerDependencies` 里的
+   `@deepseek-ai/dsh` / `dsh-*` 声明判定（`v0.2.1-alpha.3` 起；更早的版本只看 peer）。
+   semver 判定带 `includePrerelease`，所以 `^0.2.0-rc.2` 在 0.2.2-rc.3 上仍通过；
+   而不带预发布号的 `^0.2.0` 在 `0.2.0-rc.x` 运行时上会被判 false（`0.2.2-rc.x` 上则通过）。
+   判定失败时 preflight 会把该插件行置 `disabled`，只在启动 stderr 留一行，**服务器本身照样健康**
+   （所以只看 `/degraded` 会发现不了）；`compatibility.json` 的精确豁免（`<包>@<版本>`）仍是硬撑手段。
+   本项目目前**故意不写 `engines.dsh`**，继续走更宽容的 peer 规则（可跨 rc 版本）；
+   若将来要写，范围必须覆盖预发布（`^0.2.2-rc.3` 这类），并且它会完全取代 peer 判定。
    顺带核对客户端半边：0.2 删掉了 `@deepseek-ai/dsh-client-runtime`（`ClientContext` 改从
    `@deepseek-ai/cordis` 导入），`ctx.slots` 的类型声明改由
    `@deepseek-ai/dsh-client-ui-renderer/client` 提供，`dsh.client.inject` 也要跟着列真实存在的
    客户端模块。（实例：dsh-hooks 0.13.1 → 0.14.0，PR #118。）
 
-9. **发版之后还有一步：把本机 profile 的插件升上去，并删掉已经过期的豁免**。
+9. **适配新运行时不只是改 peer 下限：`devDependencies` 也要对齐当前运行版**，否则
+   typecheck 对着旧类型，查不出宿主已删的 API。0.2.2-rc.3 适配（分支 `fix/dsh-0.2.2-rc.3-compat`）：
+   `@deepseek-ai/dsh-session` 与 `dsh-client-ui-{renderer,settings,slots}` 提到 `^0.2.2-rc.3`，
+   `@deepseek-ai/cordis` 提到 `^4.1.0`；同时 `AgentRegistry.isOwnedBy()` / `roots()` 在
+   0.2.1-rc.3 被删除（guide `v0.2.1-rc.3/subagent-runtime-ownership`），`src/index.ts` 的子代理
+   回退扫描改用 Session header 的 `parentSession`（只覆盖直接子级，主路径仍是
+   `subagents.listDescendants`）。
+   核对方法：读安装目录 `docs/upgrade-guide/README.md`，按「项目上次适配版本 → 当前运行版本」
+   逐段过与本插件相关的面（Session 事件与服务、`webServer`、`systemPrompt`、client slots、
+   patch 方言），再对照 0.2.2 源码确认方法/字段仍在。
+10. **发版之后还有一步：把本机 profile 的插件升上去，并删掉已经过期的豁免**。
    `compatibility.json` 里的豁免是 `"<包>@<版本>"` 精确匹配，新版装上去后旧条目就是死数据，
    应直接删掉该文件并断言 `dsh plugin --profile web version-exemptions` 输出 `{}`。
    升级脚本照 `~/.dsh/profiles/web/upgrade-hooks-0.14.0-20261008.ps1` 的模式写：
