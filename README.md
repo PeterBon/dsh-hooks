@@ -302,7 +302,7 @@ Every hook trigger is recorded into an in-memory ring buffer (default 500 entrie
     hooks: […]
 ```
 
-Each record: timestamp, kind (run/notify), event, command, session, outcome (spawned / exit-0 / exit-nonzero / timeout / skipped / sent / send-failed, …), exit code, duration, stderr tail. Disk failures are swallowed silently — history never blocks a hook.
+Each record: timestamp, kind (run/notify), event, command, session, outcome (spawned / exit-0 / exit-nonzero / timeout / skipped / sent / send-failed, …), exit code, duration, stderr tail; new records also carry `hookIndex` (1-based hook in the config; older records lack it). Disk failures are swallowed silently — history never blocks a hook.
 
 To follow the log while you work, use `tail` (Ctrl+C to quit):
 
@@ -348,12 +348,13 @@ Simulatable fields: `turn`, `step`, `durationMs`, `toolDurationMs`, `runningSuba
 
 After install, the dsh web settings panel gains a "Hooks" section (beside General and Plugins):
 
-- **Status badges**: plugin version, the running profile, hook count, history count, plus live diagnostics (in-flight runs, recent failures)
-- **Manual tester**: pick an event (18 kinds) + reason/tool, and fill the "simulated fields" row with numeric context (`runningSubagents`, `durationMs`, usage in/out); "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks; the report clears when the inputs change
-- **Notify-channel tests**: fire a test notification at the webhook (optional Slack summary) / desktop / feishu channel and show the payload preview; once Feishu is connected the feishu channel is preselected
-- **Feishu connect**: scan-to-connect inside the panel — the QR code renders inline (with expiry countdown and a cancel button); after the scan the app is created, credentials + hook config are written, and the connected summary offers a one-click test card, an inline truncation-length editor (50–5000 chars, default 300, with a content preview), a re-connect flow, and a disconnect (optionally removing the Feishu hooks). Credentials live in `DSH_HOME` (shared by every profile) while hooks are per-profile, so **connected but no Feishu hook in the running profile** shows a warning with a one-click "write the five default Feishu hooks" fix — the trap a fresh profile falls into
-- **Hook list / editor**: a read-only list of the current hooks (event/when/match/run/notify + timeout/retry fields) with one-click "copy YAML"; the "edit" mode turns it into a form editor whose changes are validated (regexes, run-notify exclusivity) and written back to `cordis.patch.yml` with an automatic backup. Each hook's action dropdown offers `run a command`, `notify webhook`, `notify desktop`, or `notify feishu` (using the credentials from the scan, no script needed)
-- **Execution-history timeline**: at the bottom of the card, **collapsed by default** (the toggle state persists in localStorage), refreshed every 5s. Expanded, it filters by **event / outcome / session** (filters persist in localStorage, with a "showing N of M" count and a clear button) and **exports the current view as JSONL** (same shape as the on-disk `history.jsonl`, file name stamped with local time); the panel fetches the latest 200 records and filters in the browser
+- **Status badges**: plugin version, the running profile, hook count, history count, plus live diagnostics (in-flight runs, failures — the failure badge is a button that opens the history filtered to failures)
+- **Profile selector**: the dropdown at the top of the card lists existing profiles only (the running one is labeled and sorted first); it decides which profile the editor, the Feishu flow, and saves target. Picking a different profile shows a "saves only change the target profile" warning
+- **Manual tester** (collapsed by default, state persisted in localStorage): pick an event (18 kinds) + reason/tool and fill the "simulated numeric fields" with context (`runningSubagents`, `durationMs`, usage in/out); "Simulate" shows the per-hook match report, "Execute" really triggers the matching hooks (with a confirmation); the report clears when the inputs change, and a failed request shows its error inline
+- **Notify-channel tests** (collapsed by default): fire a test notification at the webhook (optional Slack summary) / desktop / feishu channel and show the payload preview; once Feishu is connected the feishu channel is preselected
+- **Feishu connect**: scan-to-connect inside the panel — the QR code renders inline (with expiry countdown and a cancel button); after the scan the app is created, credentials + hook config are written, and the connected summary offers a one-click test card, an inline truncation-length editor (50–5000 chars, default 300, with a content preview), a re-connect flow, and a disconnect (inline confirmation, optionally removing the Feishu hooks). Credentials live in `DSH_HOME` (shared by every profile) while hooks are per-profile, so **connected but no Feishu hook in the running profile** shows a warning with a one-click fix that **appends** the five default Feishu hooks (keeping existing hooks). A failed status refresh is not rendered as "not connected" — that would invite a re-scan that overwrites live credentials
+- **Hook list / editor**: a read-only list of the current hooks (event/when/match/run/notify + timeout/retry fields) with one-click "copy YAML" and "history" (jump to that hook's records); the "edit" mode turns it into a form editor whose changes are validated (regexes, run-notify exclusivity) and written back to `cordis.patch.yml` with an automatic backup. Less-used fields live in a per-hook "advanced options" disclosure. Each hook's action dropdown offers `run a command`, `notify webhook`, `notify desktop`, or `notify feishu` (using the credentials from the scan, no script needed)
+- **Execution-history timeline**: at the bottom of the card, **collapsed by default** (the toggle state persists in localStorage) and only fetched while expanded, refreshed every 5s. Expanded, it filters by **event / outcome / session / failures only**, or by a single hook's `#N` (filters persist in localStorage, with a "showing N of M" count and a clear button); each row shows the timestamp (with a date when not today), hook index, duration, exit code, and an expandable long error, and the current view **exports as JSONL** (same shape as the on-disk `history.jsonl`, file name stamped with local time); the panel fetches the latest 200 records and filters in the browser
 
 CLI/headless environments are unaffected: the browser half loads only in the web GUI and the core has no UI runtime dependencies.
 
@@ -363,7 +364,7 @@ In the web profile (when the shared webServer service exists) dsh-hooks register
 
 | Route | Method | Purpose |
 | --- | --- | --- |
-| `/dsh-hooks/status` | GET | plugin version, the **running profile**, hook count, history count, the **current hook list**, and live runner stats |
+| `/dsh-hooks/status` | GET | plugin version, the **running profile**, the **existing profile list**, hook count, history count, the **current hook list**, and live runner stats |
 | `/dsh-hooks/history?n=50` | GET | the latest N execution records (JSON envelope) |
 | `/dsh-hooks/test` | POST | simulate an event: `{"event":"tool/call","tool":"ssh_exec","execute":false}` returns a per-hook match report; `fields` overrides numeric context (`{"event":"turn/end","fields":{"runningSubagents":2}}`, unknown fields → 400); `execute: true` actually runs the matching hooks |
 | `/dsh-hooks/notify/test` | POST | fire a test notification at a channel: `{"channel":"webhook","url":…,"slack":true}`, `{"channel":"desktop"}` or `{"channel":"feishu"}` (using the scan credentials); returns the payload preview |
@@ -491,7 +492,7 @@ Open the dsh web settings → "Hooks" section → "Feishu connect", fill in the 
 1. The panel shows the Feishu authorization QR code inline (with expiry countdown)
 2. Scanning creates an app named 「DSH 通知机器人」 (only the `im:message:send_as_bot` permission); the scanning user becomes the notification target
 3. The connected summary offers "send test card", an inline truncation-length editor (50–5000 chars, default 300, effective immediately), and "re-connect" (swap the bound app)
-4. Restart `dsh web` for the hooks to take effect
+4. The hooks take effect on save (no restart when the profile hot-reloads patches)
 
 ### Option 2: setup CLI
 
@@ -511,7 +512,7 @@ Both options write the same files:
 | `~/.dsh/dsh-hooks/notify-feishu.mjs` | legacy: the scan flow up to 0.14.3 wrote this script copy; it is no longer created (hooks use the built-in channel). Still works if it exists and a hook references it |
 | `~/.dsh/profiles/<profile>/cordis.patch.yml` | dsh-hooks block: `turn/end` (completed/error/aborted) + `approval/asked` + `agent/error` card hooks |
 
-Restart `dsh web` afterwards — you will get cards when turns finish, approvals are asked, or the agent errors.
+You get cards when turns finish, approvals are asked, or the agent errors; profile patches hot-reload, so no `dsh web` restart is needed (unless the profile does not reload patches).
 
 ![Feishu card example](assets/screenshot-1.jpg)
 

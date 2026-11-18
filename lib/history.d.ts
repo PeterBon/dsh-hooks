@@ -7,6 +7,8 @@ export interface HookRunRecord {
     event: string;
     /** Rendered command (`run`) or `notify:<channel>` (`notify`). */
     command: string;
+    /** 1-based index of the hook in the config (absent on older records). */
+    hookIndex?: number;
     sessionId?: string;
     sessionName?: string;
     outcome: 'spawned' | 'spawn-failed' | 'timeout' | 'exit-0' | 'exit-nonzero' | 'skipped' | 'sent' | 'send-failed';

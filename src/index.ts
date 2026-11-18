@@ -29,6 +29,7 @@ import { fireNotify } from './notify.js'
 import { createHistorySink, type HistorySink, type HookRunRecord } from './history.js'
 import { createFeishuSetupManager } from './feishu-session.js'
 import { registerHookRoutes, type WebServerLike } from './server.js'
+import { detectRunningProfile } from './profile-path.js'
 
 export const name = 'dsh-hooks'
 
@@ -170,7 +171,15 @@ export function apply(ctx: Context, config: Config = {}) {
     const feishu = createFeishuSetupManager()
     ctx.effect(
       () => {
-        const unregister = registerHookRoutes(webServer, { hooks, history, runner, feishu: { manager: feishu } })
+        const unregister = registerHookRoutes(webServer, {
+          hooks,
+          history,
+          runner,
+          // Desktop host does not export DSH_PROFILE; detect it from its argv
+          // so the panel defaults to the profile whose hooks are actually live.
+          profile: detectRunningProfile(),
+          feishu: { manager: feishu },
+        })
         return () => {
           unregister()
           // Abort an in-flight QR scan so it never outlives the plugin.
@@ -247,7 +256,9 @@ export function apply(ctx: Context, config: Config = {}) {
    */
   const dispatchHook = (hook: HookSpec, index: number, ctxValue: HookContext): void => {
     const track = (record: Omit<HookRunRecord, 'ts'>): void => {
-      history.record(record)
+      // Attribute the record to its hook so the timeline can show `[3]` and a
+      // broken hook stays findable even when several share an event.
+      history.record({ ...record, hookIndex: index + 1 })
       const failed =
         record.outcome === 'spawn-failed' ||
         record.outcome === 'exit-nonzero' ||

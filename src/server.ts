@@ -12,9 +12,9 @@
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createRequire } from 'node:module'
 import type { HookSpec } from './config.js'
-import type { HistorySink } from './history.js'
+import type { HistorySink, HookRunRecord } from './history.js'
 import { applyMockFields, describeHook, evaluateHooks, MOCK_NUMERIC_FIELDS, mockContext, patchFilePath } from './dry-run.js'
-import { isProfileNameValid } from './profile-path.js'
+import { isProfileNameValid, listProfiles as listProfileNames } from './profile-path.js'
 import { createHookRunner, type HookRunner } from './runner.js'
 import { fireNotify, summarizeContext } from './notify.js'
 import type { HookContext } from './context.js'
@@ -205,6 +205,11 @@ export interface HookRoutesOptions {
    * `DSH_PROFILE` (set by the host), then to an empty string when unknown.
    */
   profile?: string
+  /**
+   * Existing profile names for the settings panel's target selector. Injectable
+   * so route tests never read the real `~/.dsh/profiles`.
+   */
+  listProfiles?: (running: string) => string[]
   feishu?: FeishuRouteDeps
   /** Live runner counters for the diagnostics badge. */
   runner?: Pick<HookRunner, 'stats'>
@@ -277,6 +282,7 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
   const feishuConfigPath = feishu?.configPath
   const runnerStats = options.runner?.stats ?? (() => ({ inFlight: 0, pendingRetries: 0 }))
   const resolvePatch = options.resolvePatchFile ?? patchFilePath
+  const readProfiles = options.listProfiles ?? listProfileNames
 
   return async (req: IncomingMessage, res: ServerResponse): Promise<void> => {
     if (!isLoopbackRequest(req)) {
@@ -302,6 +308,7 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
           name: 'dsh-hooks',
           version,
           profile,
+          profiles: readProfiles(profile),
           hookCount: hooks.length,
           historyCount: records.length,
           hooks: describeHooks(hooks),
@@ -378,12 +385,17 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
         const runner = createHookRunner()
         for (const line of matchedHooks) {
           const hook = hooks[line.index - 1]
-          if (hook.run) runner.run(hook, ctx)
+          // Manual executions are real triggers: record them (attributed to the
+          // hook) so the timeline shows why a test produced a notification.
+          const track = (record: Omit<HookRunRecord, 'ts'>): void => {
+            history.record({ ...record, hookIndex: line.index })
+          }
+          if (hook.run) runner.run(hook, ctx, track)
           else if (hook.notify) {
             void fireNotify(
               hook.notify,
               ctx,
-              undefined,
+              track,
               { retries: hook.retries, retryDelayMs: hook.retryDelayMs },
               feishuConfigPath,
             )
@@ -557,7 +569,7 @@ export function createHookHandler(options: HookRoutesOptions) {  const { hooks, 
             hookCount: result.hookCount,
             patchFile: result.patchFile,
             backupPath: result.backupPath,
-            message: `✅ 已保存 ${result.hookCount} 个 hook 到 ${profile} profile（已备份原文件）。若未立即生效请重启 dsh web。`,
+            message: `✅ 已保存 ${result.hookCount} 个 hook 到 ${profile} profile（原文件已备份；支持热加载的 profile 立即生效）。`,
           }),
         )
       } catch (error) {
