@@ -67,7 +67,9 @@ describe('detectRunningProfile', () => {
     expect(
       detectRunningProfile([], {
         DSH_PROFILE: 'bad name',
-        DSH_PROFILE_DIR: 'C:\\Users\\peter\\.dsh\\profiles\\work',
+        // Native separators: basename() is platform-specific, so build the
+        // fixture with join() instead of embedding a Windows path.
+        DSH_PROFILE_DIR: join('ignored', '.dsh', 'profiles', 'work'),
       }),
     ).toBe('work')
   })
