@@ -268,7 +268,7 @@ export async function runFeishuSetup(options: RunFeishuSetupOptions = {}): Promi
       cwd: process.cwd(),
       timestamp: new Date().toISOString(),
     })
-    print('✅ 欢迎卡片已发送。请重启 dsh web 使 hooks 生效。')
+    print('✅ 欢迎卡片已发送。hooks 已写入 profile 配置；支持热加载的 profile 立即生效（否则重启 dsh web）。')
   } catch (error) {
     printErr(`⚠ 欢迎卡片发送失败（配置已就绪，可稍后用 feishu-test 重试）：${error instanceof Error ? error.message : String(error)}`)
   }

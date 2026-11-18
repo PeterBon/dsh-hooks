@@ -74,6 +74,11 @@ export interface HookRoutesOptions {
      * `DSH_PROFILE` (set by the host), then to an empty string when unknown.
      */
     profile?: string;
+    /**
+     * Existing profile names for the settings panel's target selector. Injectable
+     * so route tests never read the real `~/.dsh/profiles`.
+     */
+    listProfiles?: (running: string) => string[];
     feishu?: FeishuRouteDeps;
     /** Live runner counters for the diagnostics badge. */
     runner?: Pick<HookRunner, 'stats'>;

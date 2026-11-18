@@ -51,6 +51,8 @@ export interface StatusInfo {
   version: string
   /** Profile the plugin is running inside (empty when the host did not say). */
   profile?: string
+  /** Existing profiles the editor may write to (running profile included). */
+  profiles?: string[]
   hookCount: number
   historyCount: number
   hooks: HookDescriptor[]
@@ -64,6 +66,8 @@ export interface HistoryRecord {
   kind: HistoryKind
   event: string
   command: string
+  /** 1-based index of the hook that produced this record (older records lack it). */
+  hookIndex?: number
   sessionId?: string
   sessionName?: string
   outcome: string
@@ -144,6 +148,10 @@ export interface HistoryFilter {
   outcome?: string
   /** Case-insensitive substring of the session id or readable name. */
   session?: string
+  /** Only failures and timeouts (the tones the timeline paints red/amber). */
+  failed?: boolean
+  /** Only records attributed to this 1-based hook index. */
+  hookIndex?: number
 }
 
 /**
@@ -155,6 +163,11 @@ export function filterHistory(records: readonly HistoryRecord[], filter: History
   return records.filter((record) => {
     if (filter.event !== undefined && filter.event !== '' && record.event !== filter.event) return false
     if (filter.outcome !== undefined && filter.outcome !== '' && record.outcome !== filter.outcome) return false
+    if (filter.failed === true) {
+      const tone = outcomeTone(record.outcome)
+      if (tone !== 'bad' && tone !== 'warn') return false
+    }
+    if (filter.hookIndex !== undefined && record.hookIndex !== filter.hookIndex) return false
     if (session !== undefined && session !== '') {
       const id = record.sessionId?.toLowerCase() ?? ''
       const name = record.sessionName?.toLowerCase() ?? ''
@@ -193,6 +206,20 @@ export interface TestRequest {
 }
 
 export async function postTest(body: TestRequest, fetchFn: typeof fetch = fetch): Promise<TestResult | null> {
+  const result = await postTestDetailed(body, fetchFn)
+  return result.ok ? result.result : null
+}
+
+export type DetailedTestResult = { ok: true; result: TestResult } | { ok: false; error: string }
+
+/**
+ * Same POST as {@link postTest}, but keeps the failure reason so the panel can
+ * show it instead of silently dropping the run.
+ */
+export async function postTestDetailed(
+  body: TestRequest,
+  fetchFn: typeof fetch = fetch,
+): Promise<DetailedTestResult> {
   try {
     const response = await fetchFn('/dsh-hooks/test', {
       method: 'POST',
@@ -201,13 +228,15 @@ export async function postTest(body: TestRequest, fetchFn: typeof fetch = fetch)
     })
     const envelope = (await response.json()) as Envelope<TestResult>
     if (!response.ok || !envelope.ok) {
-      console.warn(`[dsh-hooks-ui] POST /dsh-hooks/test → ${envelope.error?.message ?? `HTTP ${response.status}`}`)
-      return null
+      const message = envelope.error?.message ?? `HTTP ${response.status}`
+      console.warn(`[dsh-hooks-ui] POST /dsh-hooks/test → ${message}`)
+      return { ok: false, error: message }
     }
-    return envelope.value ?? null
+    return { ok: true, result: envelope.value ?? ({} as TestResult) }
   } catch (error) {
-    console.warn(`[dsh-hooks-ui] POST /dsh-hooks/test failed: ${error instanceof Error ? error.message : String(error)}`)
-    return null
+    const message = error instanceof Error ? error.message : String(error)
+    console.warn(`[dsh-hooks-ui] POST /dsh-hooks/test failed: ${message}`)
+    return { ok: false, error: '网络请求失败' }
   }
 }
 
@@ -378,6 +407,34 @@ export function formatTime(ts: number): string {
   const date = new Date(ts)
   const p = (value: number) => String(value).padStart(2, '0')
   return `${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`
+}
+
+/**
+ * Timestamp for the history timeline: `HH:MM:SS` when the record is from today,
+ * otherwise `MM-DD HH:MM` (with the year when it is not the current one).
+ * The bare `HH:MM:SS` made records from previous days indistinguishable.
+ */
+export function formatHistoryTime(ts: number, now: Date = new Date()): string {
+  const date = new Date(ts)
+  const p = (value: number) => String(value).padStart(2, '0')
+  const time = `${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  if (sameDay) return time
+  const year = date.getFullYear() === now.getFullYear() ? '' : `${date.getFullYear()}-`
+  return `${year}${p(date.getMonth() + 1)}-${p(date.getDate())} ${p(date.getHours())}:${p(date.getMinutes())}`
+}
+
+/** Compact duration for timeline metadata: `120ms`, `1.2s`, `2m05s`. */
+export function formatDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return '—'
+  if (ms < 1000) return `${Math.round(ms)}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`
+  const minutes = Math.floor(ms / 60_000)
+  const seconds = Math.round((ms % 60_000) / 1000)
+  return `${minutes}m${String(seconds).padStart(2, '0')}s`
 }
 
 /** Chinese outcome labels. */

@@ -4,6 +4,8 @@ import {
   fetchHistory,
   fetchStatus,
   filterHistory,
+  formatDuration,
+  formatHistoryTime,
   formatTime,
   historyExportName,
   historyToJsonl,
@@ -17,6 +19,7 @@ import {
   postHooksSave,
   postNotifyTest,
   postTest,
+  postTestDetailed,
   type HistoryRecord,
 } from '../src/client/api.ts'
 
@@ -81,12 +84,44 @@ describe('postTest', () => {
       warn.mockRestore()
     }
   })
+
+  it('keeps the failure message for the detailed variant', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const fetchFn = vi.fn().mockResolvedValue(
+        jsonResponse({ ok: false, error: { code: 'bad-request', message: '无法模拟的字段：foo' } }, false, 400),
+      )
+      expect(await postTestDetailed({ event: 'turn/end' }, fetchFn as unknown as typeof fetch)).toEqual({
+        ok: false,
+        error: '无法模拟的字段：foo',
+      })
+      expect(
+        await postTestDetailed({ event: 'x' }, vi.fn().mockRejectedValue(new Error('down')) as never),
+      ).toEqual({ ok: false, error: '网络请求失败' })
+    } finally {
+      warn.mockRestore()
+    }
+  })
 })
 
 describe('formatters', () => {
   it('formats HH:MM:SS local time', () => {
     const ts = new Date(2026, 7, 17, 9, 5, 3).getTime()
     expect(formatTime(ts)).toBe('09:05:03')
+  })
+
+  it('shows a date for history records from another day', () => {
+    const now = new Date(2026, 7, 17, 12, 0, 0)
+    expect(formatHistoryTime(new Date(2026, 7, 17, 9, 5, 3).getTime(), now)).toBe('09:05:03')
+    expect(formatHistoryTime(new Date(2026, 7, 16, 9, 5, 3).getTime(), now)).toBe('08-16 09:05')
+    expect(formatHistoryTime(new Date(2025, 11, 31, 23, 59, 0).getTime(), now)).toBe('2025-12-31 23:59')
+  })
+
+  it('formats durations compactly', () => {
+    expect(formatDuration(320)).toBe('320ms')
+    expect(formatDuration(1499)).toBe('1.5s')
+    expect(formatDuration(125_000)).toBe('2m05s')
+    expect(formatDuration(Number.NaN)).toBe('—')
   })
 
   it('labels and tones outcomes', () => {
@@ -276,6 +311,19 @@ describe('filterHistory', () => {
     expect(filterHistory(records, { event: 'turn/end', outcome: 'exit-0' }).map((r) => r.command)).toEqual(['a'])
     expect(filterHistory(records, { event: 'turn/end', session: 'sess-2' }).map((r) => r.command)).toEqual(['b'])
     expect(filterHistory(records, { event: 'step/end' })).toEqual([])
+  })
+
+  it('keeps failures and timeouts with failed:true', () => {
+    expect(filterHistory(records, { failed: true }).map((r) => r.outcome)).toEqual(['exit-nonzero', 'send-failed'])
+  })
+
+  it('filters by hook index when records carry one', () => {
+    const attributed: HistoryRecord[] = [
+      { ts: 1, kind: 'run', event: 'turn/end', command: 'a', outcome: 'exit-0', hookIndex: 1 },
+      { ts: 2, kind: 'run', event: 'turn/end', command: 'b', outcome: 'exit-0', hookIndex: 2 },
+      { ts: 3, kind: 'notify', event: 'turn/end', command: 'c', outcome: 'sent' },
+    ]
+    expect(filterHistory(attributed, { hookIndex: 2 }).map((r) => r.command)).toEqual(['b'])
   })
 })
 

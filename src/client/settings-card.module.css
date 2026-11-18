@@ -1,10 +1,24 @@
+/* Panel palette. Literal values are fallbacks for the two themes the shell
+   marks on <body>; text colors are chosen to clear WCAG AA (4.5:1) on both
+   surfaces — the previous 11px gray/green text did not. */
 :root {
-  --dsh-hooks-border: rgba(128, 132, 144, 0.22);
-  --dsh-hooks-muted: #767c85;
-  --dsh-hooks-accent: #4d8df7;
-  --dsh-hooks-ok: #3fb56b;
-  --dsh-hooks-bad: #e5534b;
-  --dsh-hooks-warn: #d9a13c;
+  --dsh-hooks-border: rgba(110, 116, 128, 0.28);
+  --dsh-hooks-muted: #5f6672;
+  --dsh-hooks-accent: #2f6fe0;
+  --dsh-hooks-accent-hover: #275fc7;
+  --dsh-hooks-ok: #1f7d47;
+  --dsh-hooks-bad: #c22f2a;
+  --dsh-hooks-warn: #8a5a00;
+}
+
+body[data-ds-dark-theme] {
+  --dsh-hooks-border: rgba(150, 156, 170, 0.3);
+  --dsh-hooks-muted: #a2a9b4;
+  --dsh-hooks-accent: #7aa7ff;
+  --dsh-hooks-accent-hover: #93b7ff;
+  --dsh-hooks-ok: #5fd18f;
+  --dsh-hooks-bad: #ff857d;
+  --dsh-hooks-warn: #e8b85e;
 }
 
 /* Card root: block-level, inherits the settings shell's colors. */
@@ -20,17 +34,36 @@
 .dh-card-head {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
 }
 
 .dh-card-title {
   font-weight: 600;
   font-size: 14px;
+  white-space: nowrap;
 }
 
 .dh-badges {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
+}
+
+/* Badge that is also a button (failure count → filtered timeline). */
+.dh-badge-button {
+  border: 0;
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dh-badge-button:hover {
+  filter: brightness(1.08);
+}
+
+.dh-badge-neutral {
+  background: rgba(128, 132, 144, 0.2);
 }
 
 .dh-badge {
@@ -43,12 +76,23 @@
 }
 
 .dh-section-title {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--dsh-hooks-muted);
   margin: 0 0 8px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
+}
+
+/* Thin rule between sections: five blocks with 14px gaps alone read as one
+   undifferentiated wall. */
+.dh-section {
+  border-top: 1px solid var(--dsh-hooks-border);
+  padding-top: 12px;
+}
+
+.dh-section:first-of-type {
+  border-top: 0;
+  padding-top: 0;
 }
 
 .dh-section-head {
@@ -65,7 +109,17 @@
 
 .dh-toggle {
   padding: 2px 10px;
-  font-size: 11px;
+  font-size: 12px;
+}
+
+.dh-profile {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dh-profile > .dh-field {
+  max-width: 280px;
 }
 
 .dh-field-narrow {
@@ -105,7 +159,7 @@
 
 .dh-record-time {
   color: var(--dsh-hooks-muted);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -128,7 +182,7 @@
 
 .dh-outcome {
   align-self: flex-start;
-  font-size: 11px;
+  font-size: 12px;
   padding: 1px 7px;
   border-radius: 9px;
   white-space: nowrap;
@@ -156,7 +210,7 @@
 
 .dh-record-error {
   margin-top: 4px;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--dsh-hooks-bad);
   white-space: pre-wrap;
   word-break: break-all;
@@ -182,16 +236,66 @@
 
 .dh-history-count {
   color: var(--dsh-hooks-muted);
-  font-size: 11px;
+  font-size: 12px;
   padding: 0 2px 6px;
+}
+
+.dh-history-filters .dh-check {
+  padding-bottom: 6px;
+}
+
+.dh-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  align-self: center;
+  padding: 2px 8px;
+  margin-bottom: 6px;
+  border-radius: 9px;
+  background: rgba(47, 111, 224, 0.14);
+  color: var(--dsh-hooks-accent);
+  font-size: 12px;
+}
+
+.dh-filter-chip button {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 0 2px;
 }
 
 .dh-record-session {
   color: var(--dsh-hooks-muted);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.dh-record-hook {
+  color: var(--dsh-hooks-accent);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.dh-record-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 2px;
+  color: var(--dsh-hooks-muted);
+  font-size: 12px;
+}
+
+.dh-record-error-details > summary {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--dsh-hooks-bad);
+  cursor: pointer;
 }
 
 .dh-test-form {
@@ -214,7 +318,7 @@
 }
 
 .dh-field-label {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--dsh-hooks-muted);
 }
 
@@ -269,14 +373,29 @@ body[data-ds-dark-theme] .dh-select {
   background: rgba(128, 132, 144, 0.22);
 }
 
+.dh-button:focus-visible {
+  outline: 2px solid var(--dsh-hooks-accent);
+  outline-offset: 1px;
+}
+
+.dh-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .dh-button-primary {
   background: var(--dsh-hooks-accent);
   border-color: var(--dsh-hooks-accent);
   color: #fff;
 }
 
+body[data-ds-dark-theme] .dh-button-primary {
+  color: #10131a;
+}
+
 .dh-button-primary:hover {
-  background: #3c7de8;
+  background: var(--dsh-hooks-accent-hover);
+  border-color: var(--dsh-hooks-accent-hover);
 }
 
 .dh-test-results {
@@ -353,7 +472,7 @@ body[data-ds-dark-theme] .dh-select {
 
 .dh-feishu-hint {
   color: var(--dsh-hooks-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Connected Feishu but no hook actually delivers through it: hooks are
@@ -461,7 +580,7 @@ body[data-ds-dark-theme] .dh-select {
 }
 
 .dh-hook-match {
-  font-size: 11px;
+  font-size: 12px;
   color: var(--dsh-hooks-accent);
   word-break: break-all;
 }
@@ -469,7 +588,13 @@ body[data-ds-dark-theme] .dh-select {
 .dh-hook-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+.dh-hook-meta > .dh-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 
 .dh-match-key {
@@ -478,10 +603,51 @@ body[data-ds-dark-theme] .dh-select {
 
 .dh-feishu-preview {
   color: var(--dsh-hooks-muted);
-  font-size: 11px;
+  font-size: 12px;
   border-left: 2px solid var(--dsh-hooks-border);
   padding: 4px 8px;
   word-break: break-all;
   max-height: 120px;
   overflow: hidden;
+}
+
+/* Disabled hook card, editor disclosures, and save-path detail. */
+.dh-hook-disabled {
+  opacity: 0.6;
+}
+
+.dh-hook-actions {
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.dh-hook-actions .dh-feishu-hint {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dh-advanced {
+  margin-top: 4px;
+}
+
+.dh-advanced > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--dsh-hooks-muted);
+}
+
+.dh-advanced[open] > summary {
+  margin-bottom: 6px;
+}
+
+.dh-advanced .dh-test-row + .dh-test-row {
+  margin-top: 6px;
+}
+
+.dh-save-detail {
+  margin-top: 4px;
+  color: var(--dsh-hooks-muted);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
 }

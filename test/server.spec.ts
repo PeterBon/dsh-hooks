@@ -520,6 +520,8 @@ describe('hook list, notify tests, and the hooks editor routes', () => {
       hooks,
       history,
       version: '9.9.9',
+      profile: 'desktop',
+      listProfiles: (running) => [running, 'web'],
       runner: { stats: () => ({ inFlight: 2, pendingRetries: 1 }) },
     })
     const res = fakeRes()
@@ -527,6 +529,8 @@ describe('hook list, notify tests, and the hooks editor routes', () => {
     const { body } = readJson(res)
     const value = (body as { value: Record<string, unknown> }).value
     expect(value.hookCount).toBe(2)
+    expect(value.profile).toBe('desktop')
+    expect(value.profiles).toEqual(['desktop', 'web'])
     expect((value.hooks as { on: string }[]).map((hook) => hook.on)).toEqual(['turn/end', 'tool/call'])
     expect(value.stats).toEqual({ inFlight: 2, pendingRetries: 1, recentFailures: 1 })
   })
