@@ -23,6 +23,17 @@ allowBuilds:
 # dsh-llm's ^4.4.3 range already admits 4.6.6, but the lockfile kept the old
 # resolution, so force the patched version until the dsh chain ships a lockfile
 # that resolves it.
+#
+# Audit exception, not a version override: GHSA-fc5q-39xc-vjpf (picomatch
+# <= 4.0.7 ReDoS via single-branch repeated extglobs) has no patched release on
+# npm yet — `first_patched_version` is still null in the GitHub advisory API
+# (checked 2026-11-18). It reaches us only through tsdown/@tsdown/css (build
+# tooling, never shipped or run at runtime). Remove this ignore and the comment
+# once picomatch publishes a fix, then pin it via the overrides below.
+auditConfig:
+  ignoreGhsas:
+    - GHSA-fc5q-39xc-vjpf
+
 overrides:
   ansi-regex: ^5.0.1
   js-yaml: ^4.3.2
