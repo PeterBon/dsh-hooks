@@ -15,6 +15,7 @@ import {
   run,
   sendCard,
   sendText,
+  stripCardImages,
   truncateText,
 } from '../examples/notify-feishu.mjs'
 
@@ -126,6 +127,39 @@ describe('truncateText', () => {
   })
 })
 
+describe('stripCardImages', () => {
+  it('replaces a local image with its alt text', () => {
+    const text = '## 趋势\n\n![桌面端 API Key 用量趋势图](.dsh-tmp/api-key-trend-desktop.png)\n\n结论：通过'
+    expect(stripCardImages(text)).toBe('## 趋势\n\n🖼 桌面端 API Key 用量趋势图\n\n结论：通过')
+  })
+
+  it('handles angle-bracket targets, absolute paths and spaces', () => {
+    expect(stripCardImages('![图](<D:\\work\\my chart.png>)')).toBe('🖼 图')
+  })
+
+  it('replaces URLs and data URIs too (cards only accept uploaded img_keys)', () => {
+    expect(stripCardImages('![远程](https://example.com/a.png)')).toBe('🖼 远程')
+    expect(stripCardImages('![内联](data:image/png;base64,AAAA)')).toBe('🖼 内联')
+  })
+
+  it('falls back to a generic label when the alt text is empty', () => {
+    expect(stripCardImages('![](D:/x.png)')).toBe('🖼 图片')
+  })
+
+  it('replaces reference-style images', () => {
+    expect(stripCardImages('![用量][chart]\n\n[chart]: .dsh-tmp/chart.png')).toBe('🖼 用量\n\n[chart]: .dsh-tmp/chart.png')
+  })
+
+  it('replaces several images in one line', () => {
+    expect(stripCardImages('![a](1.png) 与 ![b](2.png)')).toBe('🖼 a 与 🖼 b')
+  })
+
+  it('leaves ordinary links and image-free text untouched', () => {
+    expect(stripCardImages('见 [飞书文档](https://open.feishu.cn)')).toBe('见 [飞书文档](https://open.feishu.cn)')
+    expect(stripCardImages('没有图片')).toBe('没有图片')
+  })
+})
+
 describe('fmtTime / formatDuration', () => {
   it('formats timestamps in 2026/8/13 00:28:12 style', () => {
     expect(fmtTime(new Date(2026, 7, 13, 0, 28, 12))).toBe('2026/8/13 00:28:12')
@@ -170,6 +204,19 @@ describe('buildBody', () => {
   it('shows the turn content directly on turn/end', () => {
     const body = buildBody(baseCtx({ content: '构建通过，测试 71/71 全绿。' }))
     expect(body).toBe('构建通过，测试 71/71 全绿。')
+  })
+
+  it('drops markdown images instead of failing the card on an img_key', () => {
+    const body = buildBody(baseCtx({ content: '![趋势图](.dsh-tmp/api-key-trend-desktop.png)\n结论：通过' }))
+    expect(body).toBe('🖼 趋势图\n结论：通过')
+    expect(body).not.toContain('.dsh-tmp')
+  })
+
+  it('strips images before truncating so a cut never leaves half a syntax', () => {
+    const body = buildBody(baseCtx({ content: '![趋势图](.dsh-tmp/a.png)\n' + 'y'.repeat(2000) }))
+    expect(body).not.toContain('![')
+    expect(body.startsWith('🖼 趋势图\nyy')).toBe(true)
+    expect(body.endsWith('…')).toBe(true)
   })
 
   it('omits result/duration/turn meta lines from turn/end cards', () => {
@@ -258,6 +305,14 @@ describe('buildCard', () => {
     const body = '## 标题\n\n| 列 A | 列 B |\n| --- | --- |\n| 1 | 2 |'
     const card = buildCard(baseCtx(), { header: 'blue', title: 't', body })
     expect(card.body.elements[0].content).toContain(body)
+  })
+
+  it('never lets an image reach the card, even through a caller-built body', () => {
+    const card = buildCard(baseCtx(), { header: 'blue', title: 't', body: '## 标题\n![图](.dsh-tmp/a.png)' })
+    const content = card.body.elements[0].content as string
+    expect(content).toContain('## 标题')
+    expect(content).toContain('🖼 图')
+    expect(content).not.toContain('![')
   })
 })
 

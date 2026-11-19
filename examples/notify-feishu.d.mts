@@ -30,6 +30,12 @@ export interface NotifyFeishuContext {
 /** Map `DSH_HOOK*` environment variables onto the script's context shape. */
 export declare function readEnv(env?: Record<string, string | undefined>): NotifyFeishuContext
 
+/**
+ * Replace markdown images with their alt text so a card never carries an
+ * `img_key` it did not mint (Feishu rejects the whole card with `200570`).
+ */
+export declare function stripCardImages(text: string): string
+
 export declare function run(
   ctx: NotifyFeishuContext,
   args?: string[],

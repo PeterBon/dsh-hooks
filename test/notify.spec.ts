@@ -418,6 +418,35 @@ describe('sendFeishu', () => {
     expect(result.error).not.toContain('次尝试后仍失败')
   })
 
+  it('does not retry a request Feishu rejected outright', async () => {
+    feishuRunMock.mockRejectedValue(
+      new Error([
+        '飞书接口 HTTP 400 msg=Failed to create card content, ext=ErrCode: 200570;',
+        'ErrMsg: card contains invalid image keys; ErrorValue: image key .dsh-tmp/chart.png;',
+      ].join(' ')),
+    )
+    const result = await sendFeishu(ctx, { retries: 3, retryDelayMs: 1, log: () => {} })
+    expect(feishuRunMock).toHaveBeenCalledTimes(1)
+    expect(result.error).toContain('飞书通知失败: 飞书接口 HTTP 400')
+    expect(result.error).not.toContain('次尝试后仍失败')
+  })
+
+  it('retries a 429 rate limit because it describes a moment, not the request', async () => {
+    vi.useFakeTimers()
+    try {
+      feishuRunMock.mockRejectedValue(new Error('飞书接口 HTTP 429 msg=rate limited'))
+      const pending = sendFeishu(ctx, { retries: 1, retryDelayMs: 50, log: () => {} })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(feishuRunMock).toHaveBeenCalledTimes(1)
+      await vi.advanceTimersByTimeAsync(50)
+      const result = await pending
+      expect(feishuRunMock).toHaveBeenCalledTimes(2)
+      expect(result.error).toContain('（2 次尝试后仍失败）')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
   it('retries a transport failure up to the configured count', async () => {
     vi.useFakeTimers()
     try {
