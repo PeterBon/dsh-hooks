@@ -134,6 +134,26 @@ export function truncateText(text, max) {
   return (lastNl > max / 2 ? cut.slice(0, lastNl) : cut) + '…'
 }
 
+const CARD_IMAGE_RE = /!\[([^\]]*)\]\([^)\n]*\)/g
+const CARD_IMAGE_REF_RE = /!\[([^\]]*)\]\[[^\]]*\]/g
+
+/**
+ * Replace markdown images with their alt text, because a Feishu card cannot
+ * show one by path: card markdown reads `![alt](target)` and treats `target`
+ * as an `img_key` minted by `POST /open-apis/im/v1/images`, so a local or
+ * relative screenshot path — or any URL — makes the API reject the *whole*
+ * card (`HTTP 400`, `200570 card contains invalid image keys`). Turn content
+ * is written for a browser, where local charts are normal, so dropping the
+ * image and keeping `🖼 alt` keeps the notification deliverable. Images inside
+ * code fences lose their syntax too; that trade is intentional.
+ */
+export function stripCardImages(text) {
+  const t = String(text)
+  if (!t.includes('![')) return t
+  const replacement = (_match, label) => `🖼 ${label || '图片'}`
+  return t.replace(CARD_IMAGE_RE, replacement).replace(CARD_IMAGE_REF_RE, replacement)
+}
+
 /** `2026/8/13 00:28:12` style timestamps (feishu-notify parity). */
 export function fmtTime(d) {
   const p = (n) => String(n).padStart(2, '0')
@@ -185,7 +205,13 @@ export function buildBody(ctx) {
     // The turn's own words are the story: show the final assistant text
     // directly, with the failure detail first when the turn errored.
     if (error) lines.push(`详情：${truncateText(error, 200) ?? error}`)
-    if (content) lines.push(truncateText(content, resultMaxChars) ?? content)
+    if (content) {
+      // Strip images before truncation: a card image must be an uploaded
+      // img_key, so a path would fail the send, and cutting first could leave
+      // a half-written `![alt](` in the body.
+      const line = truncateText(stripCardImages(content), resultMaxChars)
+      if (line) lines.push(line)
+    }
   } else if (event === 'approval/asked') {
     lines.push('有一个操作等你批准')
     if (tool) lines.push(`工具：${tool}`)
@@ -209,7 +235,9 @@ export function buildBody(ctx) {
 /**
  * Card JSON 2.0: a single `markdown` body component carries the meta lines
  * plus an hr-separated body, so the turn's content renders with full
- * markdown (headings, tables, images, code blocks). The colored header
+ * markdown (headings, tables, code blocks). Markdown images are dropped on
+ * the way in: a card can only show an image through an uploaded `img_key`, and
+ * a path or URL fails the whole send with `200570`. The colored header
  * template is preserved.
  */
 export function buildCard(ctx, { header, title, note, body, now = new Date() } = {}) {
@@ -224,7 +252,10 @@ export function buildCard(ctx, { header, title, note, body, now = new Date() } =
   // line before `---` keeps it a thematic break — directly after text it
   // would be parsed as a setext heading underline and disappear.
   const meta = metaLines.join('  \n')
-  const content = body ? `${meta}\n\n---\n\n${body}` : meta
+  // Final guard: the body/meta may still carry image syntax (a caller-built
+  // body, a note, an unusual cwd/session name); the card must never contain
+  // one, or Feishu rejects the message instead of skipping the picture.
+  const content = stripCardImages(body ? `${meta}\n\n---\n\n${body}` : meta)
   return {
     schema: '2.0',
     header: { template: header, title: { tag: 'plain_text', content: title } },
@@ -361,7 +392,7 @@ export async function run(ctx, args = [], configPath = DEFAULT_CONFIG_PATH) {
   const token = await getToken(appId, appSecret)
   const receiveIdType = mergedReceiveIdType ?? 'open_id'
   if (opts.textMode) {
-    const text = opts.body || buildBody(presentationCtx)
+    const text = stripCardImages(opts.body || buildBody(presentationCtx))
     await sendText(token, to, text, receiveIdType)
     return { kind: 'text', text }
   }

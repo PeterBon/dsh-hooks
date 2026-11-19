@@ -21,13 +21,25 @@ export interface FeishuAttemptResult {
   kind: 'card' | 'text'
 }
 
+/** `飞书接口 HTTP 400 msg=…` — the status the example module reports. */
+const FEISHU_HTTP_STATUS_RE = /飞书接口 HTTP (\d{3})/
+
 /**
- * Whether a Feishu failure is permanent (configuration/argument mistakes) as
- * opposed to worth retrying (transport, token, API status). The example module
- * reports configuration problems with a leading `缺少 ` / `无效的`.
+ * Whether a Feishu failure is permanent (configuration/argument mistakes and
+ * rejected requests) as opposed to worth retrying (transport, token, API
+ * status). The example module reports configuration problems with a leading
+ * `缺少 ` / `无效的`, and HTTP rejections as `飞书接口 HTTP <status>`: a 4xx
+ * means Feishu will not accept the request as built (invalid card content,
+ * missing permission, bad target), so replaying the identical payload cannot
+ * succeed — except 408/429, which describe a moment rather than the request.
+ * 5xx and network failures stay retryable.
  */
 export function isPermanentFeishuError(message: string): boolean {
-  return message.startsWith('缺少 ') || message.startsWith('无效的')
+  if (message.startsWith('缺少 ') || message.startsWith('无效的')) return true
+  const status = FEISHU_HTTP_STATUS_RE.exec(message)?.[1]
+  if (status === undefined) return false
+  const code = Number(status)
+  return code >= 400 && code < 500 && code !== 408 && code !== 429
 }
 
 /**

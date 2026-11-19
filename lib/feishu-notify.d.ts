@@ -4,9 +4,14 @@ export interface FeishuAttemptResult {
     kind: 'card' | 'text';
 }
 /**
- * Whether a Feishu failure is permanent (configuration/argument mistakes) as
- * opposed to worth retrying (transport, token, API status). The example module
- * reports configuration problems with a leading `缺少 ` / `无效的`.
+ * Whether a Feishu failure is permanent (configuration/argument mistakes and
+ * rejected requests) as opposed to worth retrying (transport, token, API
+ * status). The example module reports configuration problems with a leading
+ * `缺少 ` / `无效的`, and HTTP rejections as `飞书接口 HTTP <status>`: a 4xx
+ * means Feishu will not accept the request as built (invalid card content,
+ * missing permission, bad target), so replaying the identical payload cannot
+ * succeed — except 408/429, which describe a moment rather than the request.
+ * 5xx and network failures stay retryable.
  */
 export declare function isPermanentFeishuError(message: string): boolean;
 /**
